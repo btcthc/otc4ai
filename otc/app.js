@@ -44,7 +44,7 @@ const S = {
   deals: store.get('deals', {}),        // did -> deal (maker keeps the secret here)
   settings: store.get('settings', { addr: '', auth: '', indexer: '' }),
   myOffers: store.get('myOffers', {}),  // oid -> offer (re-announced while open)
-  tab: 'board', tip: null,
+  tab: ['board', 'deals', 'agents', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'board', tip: null,
   agents: new Map(),                    // peer -> {agent, seen}
   feed: [],                             // recent protocol events from everyone on the channel
 };
@@ -287,7 +287,7 @@ function settingsHtml() {
 // ---------- events ----------
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.tab) { S.tab = b.dataset.tab; return render(); }
+  if (b.dataset.tab) { S.tab = b.dataset.tab; history.replaceState(null, '', '#' + S.tab); return render(); }
   if (b.id === 'lang') { lang = lang === 'ru' ? 'en' : 'ru'; store.set('lang', lang); return render(); }
   if (b.dataset.copy !== undefined) { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = t('copied'); return; }
   const { act, id, side } = b.dataset;
