@@ -1,6 +1,6 @@
-# INBREAZ OTC
+# OTC Bitcoin
 
-A peer-to-peer OTC board for TAP Protocol tokens, built on [Trac Intercom](https://github.com/Trac-Systems/intercom).
+A peer-to-peer OTC board for Bitcoin assets (TAP Protocol tokens today; Ordinals, DMT and Bitmap next), built on [Trac Intercom](https://github.com/Trac-Systems/intercom).
 
 People post offers like "1,000,000 GIB for 250 TAP" on a shared Intercom sidechannel. A taker picks an offer, and both sides settle with TAP `lock` actions of kind `otc` that use a hashlock. Nobody sends first, and nobody holds anyone else's tokens. There is no server, no custody, and the app never sees a private key.
 
@@ -31,7 +31,7 @@ The locks follow the TAP spec (`token-auth` redeem actions, `lock` / `claim` / `
 ## Why the board can be trusted
 
 - **Authors can't be forged.** Every sidechannel message is signed by its author's peer key. This fork adds `--sidechannel-verify-channels`, which drops any message whose signature does not match its `from` key, including relayed messages.
-- **The channel is owned.** The `inbreaz-otc` channel requires a welcome signed by the board owner. Spam and floods are throttled by Intercom's built-in proof-of-work and rate limits.
+- **The channel is owned.** The `otc-bitcoin` channel requires a welcome signed by the board owner. Spam and floods are throttled by Intercom's built-in proof-of-work and rate limits.
 - **Messages are untrusted input.** Offers and deal messages are validated in the UI, and nothing from the wire is executed. A revealed secret is accepted only if it hashes to the deal hash.
 - **No custody.** The app holds nothing that can be stolen. The worst a malicious counterparty can do is waste time, because the refund paths always stay open.
 

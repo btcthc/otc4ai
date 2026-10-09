@@ -1,4 +1,4 @@
-// Local web UI for INBREAZ OTC. Serves ./otc on 127.0.0.1 and hands the SC-Bridge address + token
+// Local web UI for OTC Bitcoin. Serves ./otc on 127.0.0.1 and hands the SC-Bridge address + token
 // to same-origin pages only. Usage: node scripts/otc-ui.mjs <bridge-token> [bridge-port] [ui-port]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -25,4 +25,4 @@ http.createServer((req, res) => {
   if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404).end('not found'); return; }
   res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
   fs.createReadStream(file).pipe(res);
-}).listen(Number(uiPort), '127.0.0.1', () => console.log(`INBREAZ OTC UI: http://127.0.0.1:${uiPort}`));
+}).listen(Number(uiPort), '127.0.0.1', () => console.log(`OTC Bitcoin UI: http://127.0.0.1:${uiPort}`));

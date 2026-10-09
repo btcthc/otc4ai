@@ -1,4 +1,4 @@
-# Starts your INBREAZ OTC peer (own console window) and the local web UI, then opens the browser.
+# Starts your OTC Bitcoin peer (own console window) and the local web UI, then opens the browser.
 # Usage:  powershell -ExecutionPolicy Bypass -File .\start-otc.ps1 [-Name admin] [-BridgePort 49222] [-UiPort 8787]
 param([string]$Name = "admin", [int]$BridgePort = 49222, [int]$UiPort = 8787, [switch]$NoBrowser)
 $ErrorActionPreference = "Stop"
@@ -21,14 +21,14 @@ $bytes = New-Object byte[] 32
 $token = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
 
 $peerArgs = @(
-  "--peer-store-name", "otc-$Name", "--msb-store-name", "otc-$Name-msb", "--subnet-channel", "inbreaz-otc-$Name",
+  "--peer-store-name", "otc-$Name", "--msb-store-name", "otc-$Name-msb", "--subnet-channel", "otc-bitcoin-$Name",
   "--sc-bridge", "1", "--sc-bridge-port", "$BridgePort", "--sc-bridge-token", $token,
   "--sidechannels", $ch.channel, "--sidechannel-owner", "$($ch.channel):$($ch.owner)",
   "--sidechannel-welcome", "$($ch.channel):@./otc/welcome.b64", "--sidechannel-verify-channels", $ch.channel
 ) -join ' '
 $pathLine = "`$env:PATH='$env:PATH'"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='INBREAZ OTC peer ($Name)'; npm start -- $peerArgs"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='INBREAZ OTC UI ($Name)'; node scripts/otc-ui.mjs $token $BridgePort $UiPort" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC Bitcoin peer ($Name)'; npm start -- $peerArgs"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC Bitcoin UI ($Name)'; node scripts/otc-ui.mjs $token $BridgePort $UiPort" -WindowStyle Minimized
 
 Write-Host "Peer and UI starting. Board: http://127.0.0.1:$UiPort" -ForegroundColor Green
 if (-not $NoBrowser) { Start-Sleep 4; Start-Process "http://127.0.0.1:$UiPort" }

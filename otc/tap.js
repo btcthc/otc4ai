@@ -1,4 +1,4 @@
-// TAP settlement helpers for INBREAZ OTC.
+// TAP settlement helpers for OTC Bitcoin.
 // Builds token-auth `lock` / `claim` actions (TAP spec, kind "otc", hashlock condition)
 // and verifies them against an ord-tap indexer. Never touches private keys.
 
@@ -6,7 +6,7 @@ const enc = new TextEncoder();
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const unhex = (h) => new Uint8Array(h.match(/../g).map((x) => parseInt(x, 16)));
 
-export const DOM = 'inbreaz-otc';
+export const DOM = 'otc-bitcoin';
 // Maker (secret holder) locks first with the longer window; taker locks second with the shorter one.
 // Maker must claim the taker lock before T2 (revealing the secret), leaving the taker >= GAP blocks to claim.
 export const WINDOW = { maker: 288, taker: 144, minGap: 72 }; // blocks (~48h / ~24h / ~12h)
