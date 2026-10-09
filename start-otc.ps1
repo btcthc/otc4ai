@@ -1,6 +1,7 @@
 # Starts your OTC Bitcoin peer (own console window) and the local web UI, then opens the browser.
 # Usage:  powershell -ExecutionPolicy Bypass -File .\start-otc.ps1 [-Name admin] [-BridgePort 49222] [-UiPort 8787]
-param([string]$Name = "admin", [int]$BridgePort = 49222, [int]$UiPort = 8787, [switch]$NoBrowser)
+#         add -Bot agent\configs\mm-1.json to run a trading bot on this peer instead of the web UI
+param([string]$Name = "admin", [int]$BridgePort = 49222, [int]$UiPort = 8787, [string]$Bot = "", [switch]$NoBrowser)
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
 Set-Location $here
@@ -28,6 +29,13 @@ $peerArgs = @(
 ) -join ' '
 $pathLine = "`$env:PATH='$env:PATH'"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC Bitcoin peer ($Name)'; npm start -- $peerArgs"
+if ($Bot) {
+  # The bot waits a little for the peer's bridge, then trades through it.
+  $botLine = "Start-Sleep 20; node agent/run-bot.mjs '$Bot' $token $BridgePort"
+  Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC Bitcoin bot ($Name)'; $botLine"
+  Write-Host "Peer and bot ($Bot) starting." -ForegroundColor Green
+  exit 0
+}
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC Bitcoin UI ($Name)'; node scripts/otc-ui.mjs $token $BridgePort $UiPort" -WindowStyle Minimized
 
 Write-Host "Peer and UI starting. Board: http://127.0.0.1:$UiPort" -ForegroundColor Green

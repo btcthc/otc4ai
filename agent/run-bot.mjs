@@ -1,0 +1,42 @@
+// Runs one trading bot against a local Intercom peer.
+// Usage: node agent/run-bot.mjs <config.json> <bridge-token> [bridge-port]
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { OtcAgent } from './engine.mjs';
+import { paperSettle, draftSettle } from './settle.mjs';
+import { STRATEGIES } from './bots.mjs';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const [cfgPath, token, port = '49222'] = process.argv.slice(2);
+if (!cfgPath || !token) { console.error('usage: node agent/run-bot.mjs <config.json> <bridge-token> [bridge-port]'); process.exit(1); }
+const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+const channel = JSON.parse(fs.readFileSync(path.join(root, 'otc/channel.json'), 'utf8')).channel;
+const log = (s) => console.log(`${new Date().toISOString().slice(11, 19)} [${cfg.name}] ${s}`);
+
+const mode = cfg.mode || 'paper';
+if (mode === 'live') { console.error('live mode is not available yet; use paper or draft'); process.exit(1); }
+const settle = mode === 'draft'
+  ? draftSettle({ outbox: path.join(root, 'agent/outbox', cfg.name), auth: cfg.auth, indexer: cfg.indexer, log })
+  : paperSettle();
+
+const agent = new OtcAgent({ bridge: `ws://127.0.0.1:${port}`, token, channel, name: cfg.name, addr: cfg.addr, mode, settle, policy: { pairs: () => [] } });
+const strat = STRATEGIES[cfg.strategy];
+if (!strat) { console.error('unknown strategy ' + cfg.strategy); process.exit(1); }
+const bot = strat(cfg, agent, log);
+agent.policy = bot.policy;
+
+const stats = { deals: 0, done: 0, failed: 0 };
+agent.on('log', log);
+agent.on('deal', (d) => {
+  if (d.state === 'taken' || d.state === 'requested') stats.deals++;
+  if (d.state === 'done') stats.done++;
+  if (['failed', 'rejected', 'expired'].includes(d.state)) stats.failed++;
+  log(`deal ${d.id} ${d.role} ${d.offer.give.amt} ${d.offer.give.tick} ⇄ ${d.offer.want.amt} ${d.offer.want.tick}: ${d.state}${d.note ? ' — ' + d.note : ''}`);
+});
+setInterval(() => log(`stats ${JSON.stringify(stats)} · agents seen ${agent.agents.size} · board offers ${agent.offers.size}`), 120e3);
+
+await agent.connect();
+log(`online as ${agent.me.slice(0, 12)}… mode=${mode} strategy=${cfg.strategy}`);
+bot.start();
+process.on('SIGINT', () => { agent.close(); process.exit(0); });

@@ -1,0 +1,13 @@
+{
+  "name": "mm-1",
+  "strategy": "market-maker",
+  "mode": "paper",
+  "addr": "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
+  "pairs": [
+    { "base": "gib", "quote": "tap", "mid": 0.00025, "spread": 0.02, "size": 1000000, "maxBase": 5000000 },
+    { "base": "dmt-nat", "quote": "tap", "mid": 0.8, "spread": 0.03, "size": 500, "maxBase": 5000 }
+  ],
+  "inventory": { "gib": 20000000, "tap": 8000, "dmt-nat": 10000 },
+  "refreshSec": 90,
+  "drift": 0.004
+}

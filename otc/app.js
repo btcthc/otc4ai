@@ -9,6 +9,7 @@ const RU = {
   needAddr: 'Сначала укажите свой Taproot-адрес (bc1p…) в настройках.', yourAddr: 'Ваш BTC Taproot-адрес (получение токенов)',
   authId: 'ID вашего token-auth authority (для подписи)', indexer: 'URL индексатора ord-tap (необязательно)', save: 'Сохранить', saved: 'Сохранено',
   backup: 'Скачать резервную копию сделок', noDeals: 'Сделок пока нет.',
+  agents: 'Агенты', agentsOnline: 'Боты в сети', feed: 'Живая лента', noAgents: 'Пока ни одного бота. Запустите своего: start-otc.ps1 -Bot', botDemo: 'бот · демо', pairs: 'Пары', lastSeen: 'был',
   accept: 'Принять', reject: 'Отклонить', step: 'Шаг', status: 'Статус', copy: 'Копировать', copied: 'Скопировано',
   lockIdPh: 'ID замка: <inscription>i0:0', submitLock: 'Я записал замок', verify: 'Проверить замок', claimDone: 'Я забрал токены',
   refundTitle: 'Возврат', refundText: 'Окно возврата открыто. Запишите это действие, чтобы вернуть свои токены.',
@@ -23,6 +24,7 @@ Object.assign(EN, {
   needAddr: 'Set your Taproot address (bc1p…) in Settings first.', yourAddr: 'Your BTC Taproot address (receives tokens)',
   authId: 'Your token-auth authority id (for signing)', indexer: 'ord-tap indexer URL (optional)', save: 'Save', saved: 'Saved',
   backup: 'Download deal backup', noDeals: 'No deals yet.',
+  agents: 'Agents', agentsOnline: 'Bots online', feed: 'Live feed', noAgents: 'No bots yet. Start your own: start-otc.ps1 -Bot', botDemo: 'bot · paper', pairs: 'Pairs', lastSeen: 'seen',
   accept: 'Accept', reject: 'Reject', step: 'Step', status: 'Status', copy: 'Copy', copied: 'Copied',
   lockIdPh: 'Lock id: <inscription>i0:0', submitLock: 'I inscribed the lock', verify: 'Verify lock', claimDone: 'I claimed the tokens',
   refundTitle: 'Refund', refundText: 'The refund window is open. Inscribe this action to get your tokens back.',
@@ -43,6 +45,8 @@ const S = {
   settings: store.get('settings', { addr: '', auth: '', indexer: '' }),
   myOffers: store.get('myOffers', {}),  // oid -> offer (re-announced while open)
   tab: 'board', tip: null,
+  agents: new Map(),                    // peer -> {agent, seen}
+  feed: [],                             // recent protocol events from everyone on the channel
 };
 const APP = 'otc-bitcoin';
 const $ = (s, r = document) => r.querySelector(s);
@@ -80,6 +84,8 @@ function validOffer(o) {
 }
 function onMsg(from, m) {
   if (!m || m.app !== APP || m.v !== 1 || !from) return;
+  if (m.t === 'announce' && m.agent && typeof m.agent.name === 'string') { S.agents.set(from, { agent: m.agent, seen: Date.now() }); scheduleRender(); return; }
+  if (['rfq', 'quote', 'take', 'accept', 'locked', 'claimed', 'reject'].includes(m.t)) { S.feed.unshift({ ts: Date.now(), from, m }); S.feed.length = Math.min(S.feed.length, 60); if (S.tab === 'agents') scheduleRender(); }
   if (m.t === 'offer' && validOffer(m.offer)) {
     S.offers.set(m.offer.oid, { offer: m.offer, from, seen: Date.now() }); scheduleRender();
   } else if (m.t === 'cancel') {
@@ -194,16 +200,20 @@ function render() {
   main.querySelectorAll('input').forEach((i) => { keep[i.id || i.name] = i.value; });
   if (S.tab === 'board') main.innerHTML = boardHtml();
   else if (S.tab === 'deals') main.innerHTML = dealsHtml();
+  else if (S.tab === 'agents') main.innerHTML = agentsHtml();
   else main.innerHTML = settingsHtml();
   main.querySelectorAll('input').forEach((i) => { const k = i.id || i.name; if (keep[k] !== undefined) i.value = keep[k]; if (k === focus) i.focus(); });
 }
 function boardHtml() {
   const rows = [...S.offers.values()].sort((a, b) => b.offer.exp - a.offer.exp).map(({ offer: o, from }) => {
-    const mine = from === S.me, px = Number(o.want.amt) / Number(o.give.amt);
+    const mine = from === S.me, paper = o.mode === 'paper';
+    // Quote prices in the counter asset per one unit of the other (TAP is the usual quote asset).
+    const inv = o.give.tick.toLowerCase() === 'tap', base = inv ? o.want : o.give, quote = inv ? o.give : o.want;
+    const px = Number(quote.amt) / Number(base.amt);
     return `<tr><td><b>${esc(o.give.amt)}</b> ${esc(o.give.tick)}</td><td><b>${esc(o.want.amt)}</b> ${esc(o.want.tick)}</td>
-      <td class="mono">${px.toPrecision(4)} ${esc(o.want.tick)}/${esc(o.give.tick)}</td><td class="mute">${esc(o.note)}</td>
+      <td class="mono">${px.toPrecision(4)} ${esc(quote.tick)}/${esc(base.tick)}</td><td class="mute">${esc(o.note)}</td>
       <td class="mono mute">${mine ? t('mine') : short(from)}</td>
-      <td>${mine ? `<button class="ghost" data-act="cancel" data-id="${o.oid}">${t('cancel')}</button>` : `<button data-act="take" data-id="${o.oid}">${t('take')}</button>`}</td></tr>`;
+      <td>${mine ? `<button class="ghost" data-act="cancel" data-id="${o.oid}">${t('cancel')}</button>` : paper ? `<span class="pill">${t('botDemo')}</span>` : `<button data-act="take" data-id="${o.oid}">${t('take')}</button>`}</td></tr>`;
   }).join('');
   return `<div class="grid"><section class="card"><h2>${t('board')}</h2>
     ${rows ? `<div class="tw"><table><thead><tr><th>${t('give')}</th><th>${t('want')}</th><th>${t('price')}</th><th>${t('note')}</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="mute">${t('noOffers')}</p>`}
@@ -243,6 +253,25 @@ function dealHtml(d) {
   const myLock = d.role === 'maker' ? d.makerLock : d.takerLock, myRefund = d.role === 'maker' ? d.t1 : d.t2;
   if (myLock && S.tip && S.tip >= myRefund && d.state !== 'done') body += `<h3>${t('refundTitle')}</h3><p>${t('refundText')}</p>${code(tap.redeemDraft(auth, [tap.refundAction(myLock)]))}`;
   return `<section class="card deal">${head}${body}</section>`;
+}
+const who = (k) => (k === S.me ? 'you' : S.agents.get(k)?.agent.name || short(k));
+function feedLine({ ts, from, m }) {
+  const time = new Date(ts).toTimeString().slice(0, 8), o = m.offer;
+  const txt = m.t === 'rfq' ? `asks for quotes: ${m.side} ${esc(m.amt)} ${esc(m.tick)} vs ${esc(m.against)}`
+    : m.t === 'quote' ? `quotes ${who(m.to)}: ${esc(o?.give.amt)} ${esc(o?.give.tick)} for ${esc(o?.want.amt)} ${esc(o?.want.tick)}`
+    : m.t === 'take' ? `takes an offer from ${who(m.to)}`
+    : m.t === 'accept' ? `accepts deal ${esc(m.did)} · hashlock ${esc(String(m.hash).slice(0, 10))}…`
+    : m.t === 'locked' ? `locked (${esc(m.side)}) ${esc(String(m.lock).slice(0, 40))}`
+    : m.t === 'claimed' ? `claimed — deal ${esc(m.did)} complete ✔`
+    : `rejected deal ${esc(m.did)}`;
+  return `<tr><td class="mono mute">${time}</td><td><b>${esc(who(from))}</b></td><td>${txt}</td></tr>`;
+}
+function agentsHtml() {
+  const now = Date.now();
+  const list = [...S.agents.entries()].filter(([, a]) => now - a.seen < 3 * 60e3).map(([k, { agent: a, seen }]) =>
+    `<tr><td><b>${esc(a.name)}</b> <span class="pill">${esc((a.modes || []).join(','))}</span></td><td class="mono">${esc((a.pairs || []).join(' · '))}</td><td class="mono mute">${short(k)}</td><td class="mute">${Math.round((now - seen) / 1000)}s</td></tr>`).join('');
+  return `<div class="grid"><section class="card"><h2>${t('feed')}</h2>${S.feed.length ? `<div class="tw"><table><tbody>${S.feed.map(feedLine).join('')}</tbody></table></div>` : '<p class="mute">…</p>'}</section>
+    <section class="card"><h2>${t('agentsOnline')}</h2>${list ? `<div class="tw"><table><thead><tr><th></th><th>${t('pairs')}</th><th></th><th>${t('lastSeen')}</th></tr></thead><tbody>${list}</tbody></table></div>` : `<p class="mute">${t('noAgents')}</p>`}</section></div>`;
 }
 function settingsHtml() {
   const s = S.settings;
