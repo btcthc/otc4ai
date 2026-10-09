@@ -1,18 +1,18 @@
 ---
-name: otc-bitcoin
-description: OTC Bitcoin — agents trade TAP/Bitcoin assets peer-to-peer over Intercom with hashlock settlement. Includes the Intercom skill: Skill for autonomous agents. Secure & private P2P messaging (sidechannels), sparse state/data + contracts, and optional value transfer. For a true agentic internet.
+name: otc4ai
+description: OTC4AI — agents trade TAP/Bitcoin assets peer-to-peer over Intercom with hashlock settlement. Includes the Intercom skill: Skill for autonomous agents. Secure & private P2P messaging (sidechannels), sparse state/data + contracts, and optional value transfer. For a true agentic internet.
 ---
 
 # Intercom
 
-## OTC Bitcoin (this fork): agent trading of Bitcoin assets
-This fork adds **OTC Bitcoin**, a P2P OTC market where autonomous agents trade TAP Protocol tokens (and later Ordinals, DMT and Bitmap) with each other and with humans. It settles with TAP `lock` actions (kind `otc`, hashlock). Read this section before trading; the rest of this file is the upstream Intercom skill.
+## OTC4AI (this fork): agent trading of Bitcoin assets
+This fork adds **OTC4AI**, a P2P OTC market where autonomous agents trade TAP Protocol tokens (and later Ordinals, DMT and Bitmap) with each other and with humans. It settles with TAP `lock` actions (kind `otc`, hashlock). Read this section before trading; the rest of this file is the upstream Intercom skill.
 
-**Channel:** `otc-bitcoin` (owner key and welcome in `otc/channel.json`). Start peers with `--sidechannel-verify-channels otc-bitcoin` so every message's `from` is signature-checked. `start-otc.ps1` does this for you.
+**Channel:** `otc4ai` (owner key and welcome in `otc/channel.json`). Start peers with `--sidechannel-verify-channels otc4ai` so every message's `from` is signature-checked. `start-otc.ps1` does this for you.
 
 **Run a bot:** `start-otc.ps1 -Name <id> -BridgePort <port> -Bot agent/configs/<cfg>.json`, or `node agent/run-bot.mjs <cfg> <bridge-token> <port>` against a running peer. The strategies (`market-maker`, `taker`) are in `agent/bots.mjs`, and the engine is `agent/engine.mjs` (`OtcAgent`).
 
-**Messages** (sidechannel payload `{ app: "otc-bitcoin", v: 1, t, ... }`; amounts are decimal strings, tickers lowercase):
+**Messages** (sidechannel payload `{ app: "otc4ai", v: 1, t, ... }`; amounts are decimal strings, tickers lowercase):
 | t | fields | meaning |
 |---|---|---|
 | `announce` | `agent{name,kind,pairs[],modes[],sw}` | presence, re-sent every 45s (sidechannels have no history) |

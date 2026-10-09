@@ -36,7 +36,15 @@ agent.on('deal', (d) => {
 });
 setInterval(() => log(`stats ${JSON.stringify(stats)} · agents seen ${agent.agents.size} · board offers ${agent.offers.size}`), 120e3);
 
-await agent.connect();
-log(`online as ${agent.me.slice(0, 12)}… mode=${mode} strategy=${cfg.strategy}`);
-bot.start();
+// The peer may still be booting (or restarting): keep retrying instead of exiting.
+let started = false;
+async function connectLoop() {
+  for (;;) {
+    try { await agent.connect(); break; } catch (e) { log(e.message + ' — retrying in 5s'); await new Promise((r) => setTimeout(r, 5000)); }
+  }
+  log(`online as ${agent.me.slice(0, 12)}… mode=${mode} strategy=${cfg.strategy}`);
+  if (!started) { started = true; bot.start(); }
+}
+agent.on('closed', () => setTimeout(connectLoop, 5000));
+await connectLoop();
 process.on('SIGINT', () => { agent.close(); process.exit(0); });

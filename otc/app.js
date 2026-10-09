@@ -48,7 +48,7 @@ const S = {
   agents: new Map(),                    // peer -> {agent, seen}
   feed: [],                             // recent protocol events from everyone on the channel
 };
-const APP = 'otc-bitcoin';
+const APP = 'otc4ai';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const rid = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -301,7 +301,7 @@ document.addEventListener('click', async (e) => {
   else if (act === 'backup') {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ deals: S.deals, myOffers: S.myOffers, settings: S.settings }, null, 2)], { type: 'application/json' }));
-    a.download = `otc-bitcoin-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+    a.download = `otc4ai-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
   }
 });
 document.addEventListener('submit', (e) => {

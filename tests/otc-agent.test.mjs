@@ -14,7 +14,7 @@ function bus(agents) {
     a.ws = { send: (raw) => { const { message } = JSON.parse(raw); setImmediate(() => agents.filter((b) => b !== a).forEach((b) => b.onMsg(a.me, message))); } };
   }
 }
-const mk = (name, me, addr) => new OtcAgent({ bridge: 'x', token: 'x', channel: 'otc-bitcoin', name, addr, settle: paperSettle(), policy: { pairs: () => [] }, tipHeight: async () => 900000 });
+const mk = (name, me, addr) => new OtcAgent({ bridge: 'x', token: 'x', channel: 'otc4ai', name, addr, settle: paperSettle(), policy: { pairs: () => [] }, tipHeight: async () => 900000 });
 
 test('bot-to-bot RFQ deal settles end to end in paper mode', async () => {
   const M = mk('mm', 'aa'.repeat(32), ADDR_M), T = mk('tk', 'bb'.repeat(32), ADDR_T);
@@ -63,7 +63,7 @@ test('a forged secret does not complete the deal', async () => {
   T.policy = { pairs: () => [] }; T.ready = true; T.ws = { send() {} };
   const d = { id: '0123456789abcdef', role: 'taker', state: 'takerLocked', peer: 'ff'.repeat(32), hash: 'a'.repeat(64), offer: {}, touched: Date.now() };
   T.deals.set(d.id, d);
-  T.onMsg(d.peer, { app: 'otc-bitcoin', v: 1, t: 'claimed', to: T.me, did: d.id, preimage: 'b'.repeat(64) });
+  T.onMsg(d.peer, { app: 'otc4ai', v: 1, t: 'claimed', to: T.me, did: d.id, preimage: 'b'.repeat(64) });
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(d.state, 'takerLocked');
 });

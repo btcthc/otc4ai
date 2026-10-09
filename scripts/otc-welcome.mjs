@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const token = process.argv[2];
 const port = process.argv[3] || '49222';
-const CHANNEL = 'otc-bitcoin';
+const CHANNEL = 'otc4ai';
 if (!token) {
   console.error('usage: node scripts/otc-welcome.mjs <bridge-token> [port]');
   process.exit(1);
@@ -20,7 +20,7 @@ const send = (o) => ws.send(JSON.stringify(o));
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.type === 'hello') { peer = m.peer; send({ type: 'auth', token }); }
-  else if (m.type === 'auth_ok') send({ id: 1, type: 'cli', command: `/sc_welcome --channel "${CHANNEL}" --text "OTC Bitcoin board v1. Non-custodial: settle with TAP hashlock locks only. Never send first."` });
+  else if (m.type === 'auth_ok') send({ id: 1, type: 'cli', command: `/sc_welcome --channel "${CHANNEL}" --text "OTC4AI board v1. Non-custodial: settle with TAP hashlock locks only. Never send first."` });
   else if (m.type === 'cli_result') {
     const text = (m.output || []).join('\n');
     const b64 = (text.match(/welcome_b64[^A-Za-z0-9+/=]*([A-Za-z0-9+/=]{40,})/) || [])[1];

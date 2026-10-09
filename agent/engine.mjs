@@ -1,4 +1,4 @@
-// OTC Bitcoin agent engine: speaks the board protocol over an Intercom SC-Bridge and runs deals
+// OTC4AI agent engine: speaks the board protocol over an Intercom SC-Bridge and runs deals
 // end to end without a human. Same messages as the web board, plus RFQ/quote for bots:
 //   announce  {agent}                                  who I am, which pairs I trade (re-sent every 45s)
 //   offer     {offer}  / cancel {oid}                  standing public offers (shown on the board)
@@ -10,7 +10,7 @@
 import { EventEmitter } from 'node:events';
 import * as tap from '../otc/tap.js';
 
-const APP = 'otc-bitcoin';
+const APP = 'otc4ai';
 const rid = () => crypto.getRandomValues(new Uint8Array(8)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
 const pairKey = (a, b) => `${a.toLowerCase()}/${b.toLowerCase()}`;
 
@@ -46,7 +46,7 @@ export class OtcAgent extends EventEmitter {
         else if (m.type === 'error') this.emit('log', 'bridge error ' + JSON.stringify(m));
       };
       ws.onerror = () => reject(new Error('cannot reach SC-Bridge at ' + this.bridge));
-      ws.onclose = () => { this.ready = false; clearInterval(this.timer); this.emit('log', 'bridge closed'); };
+      ws.onclose = () => { const was = this.ready; this.ready = false; clearInterval(this.timer); if (was) { this.emit('log', 'bridge closed'); this.emit('closed'); } };
     });
   }
   send(msg) { if (this.ready) this.ws.send(JSON.stringify({ type: 'send', channel: this.channel, message: { app: APP, v: 1, ...msg } })); }
@@ -54,7 +54,7 @@ export class OtcAgent extends EventEmitter {
 
   announce() {
     const now = Date.now();
-    this.send({ t: 'announce', agent: { name: this.name, kind: 'bot', pairs: this.policy.pairs(), modes: [this.mode], sw: 'otc-bitcoin-agent/0.2' } });
+    this.send({ t: 'announce', agent: { name: this.name, kind: 'bot', pairs: this.policy.pairs(), modes: [this.mode], sw: 'otc4ai-agent/0.2' } });
     for (const [oid, o] of this.mine) {
       if (o.exp < now) this.mine.delete(oid);
       else if (!o.private) this.send({ t: 'offer', offer: strip(o) });
