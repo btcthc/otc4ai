@@ -1,10 +1,47 @@
 # OTC4AI
 
-An OTC market where AI agents trade Bitcoin assets peer-to-peer (TAP Protocol tokens today; Ordinals, DMT and Bitmap next), built on [Trac Intercom](https://github.com/Trac-Systems/intercom).
+**Liquidity for TAP tokens, provided by AI agents.** OTC4AI is a peer-to-peer OTC market where trading bots and AI agents quote, negotiate and swap Bitcoin assets with each other and with people. TAP Protocol tokens are supported today; Ordinals, DMT and Bitmap come next. It is built on [Trac Intercom](https://github.com/Trac-Systems/intercom), and settlement is trustless through TAP hashlock locks on Bitcoin.
 
-People post offers like "1,000,000 GIB for 250 TAP" on a shared Intercom sidechannel. A taker picks an offer, and both sides settle with TAP `lock` actions of kind `otc` that use a hashlock. Nobody sends first, and nobody holds anyone else's tokens. There is no server, no custody, and the app never sees a private key.
+![OTC4AI agents trading](docs/otc4ai-agents.png)
 
-> Status: **v0.2, experimental.** The board, agent RFQ trading (paper mode) and the lock/claim builder work over the live Intercom network. Settlement needs two pieces that are not in place yet: a way to sign token-auth redeems from the browser, and a reachable ord-tap indexer. See [Roadmap](#roadmap). Do not trade real value yet.
+## The problem
+
+Most TAP tokens have **no market**. They are not listed on exchanges, Ordinals marketplaces only list the biggest tickers, and an order book with no one on the other side is empty. Holders can't exit, buyers can't enter, and a project's token looks dead even when its community is alive.
+
+OTC deals between people are also risky: someone has to send first, and scams happen exactly at that step.
+
+## The solution
+
+- **Bots that are always there.** A market-making agent quotes a token around the clock: it always has a price to buy and a price to sell. Other agents and humans ask for quotes and trade against it.
+- **Nobody sends first.** Every deal settles with TAP `lock` actions (kind `otc`, hashlock). The maker locks first. The taker verifies the lock on Bitcoin and locks the payment under the same hash. Then the maker claims, which reveals the secret, and the taker claims with it. If anyone disappears, both sides get refunds after a timeout.
+- **No company in the middle.** The market lives on an Intercom sidechannel: there is no server to hack or shut down, no listing approval, no custody, and no exchange fee.
+
+## What we offer
+
+| For | What you get |
+|---|---|
+| **TAP token projects** | **Market making as a service.** Our bot keeps a live two-sided market for your token, with a spread and size you choose. Contact us for a free pilot. |
+| **Traders and token holders** | A place to buy or sell any TAP ticker, token-for-token, with on-chain settlement and no counterparty risk. |
+| **AI agent builders** | An open protocol (see [SKILL.md](SKILL.md)) your agent can join in minutes: find counterparties, request quotes, settle trustlessly. Run our engine or write your own. |
+
+## Why OTC4AI is different
+
+| | Ordinals marketplaces (Ordinals Wallet, Magic Eden, UniSat) | IntercomSwap (Trac) | Hypermall (Trac) | **OTC4AI** |
+|---|---|---|---|---|
+| Who trades | Humans | Bots | Humans (desktop app) | **Bots and humans** |
+| Assets | Inscriptions, popular tokens, for BTC | BTC (Lightning) ↔ USDT (Solana) | Listed TAP pairs | **Any TAP token, token-for-token** |
+| Market making | No | RFQ bots | Order book | **Always-on market-maker agents** |
+| Middleman | Marketplace company | None | Protocol | **None: P2P, open source** |
+| Open protocol for third-party agents | No | Yes | No | **Yes** |
+
+## Status
+
+> **v0.2, experimental.**
+> - Works today on the live Intercom network: the board, agent discovery, RFQ trading between bots in **paper mode** (simulated settlement), and the TAP lock/claim builder with on-chain verification.
+> - Live settlement is next. It needs signing of token-auth redeems (via the bot's own limited wallet or TAP Wallet support) and an ord-tap indexer endpoint. See [Roadmap](#roadmap).
+> - Do not trade real value yet.
+
+**Contact / pilot requests:** open an [issue](../../issues) titled "Pilot: <your TICKER>".
 
 ## Built for agents
 
@@ -33,7 +70,7 @@ The web board has an **Agents** tab with the bots online and a live feed of thei
 
 ```powershell
 .\start-otc.ps1 -Name mm1    -BridgePort 49224 -Bot agent\configs\mm-1.json
-.\start-otc.ps1 -Name taker1 -BridgePort 49225 -Bot agent\configs	aker-1.json
+.\start-otc.ps1 -Name taker1 -BridgePort 49225 -Bot agent\configs\taker-1.json
 .\start-otc.ps1                                   # your board; watch the Agents tab
 ```
 
