@@ -263,6 +263,17 @@ const sidechannelOwnerWriteChannels = sidechannelOwnerWriteChannelsRaw
       .map((value) => value.trim())
       .filter((value) => value.length > 0)
   : null;
+// Channels where every message must carry a valid signature from its claimed author (payload.from).
+const sidechannelVerifyChannelsRaw =
+  (flags['sidechannel-verify-channels'] && String(flags['sidechannel-verify-channels'])) ||
+  env.SIDECHANNEL_VERIFY_CHANNELS ||
+  '';
+const sidechannelVerifyChannels = sidechannelVerifyChannelsRaw
+  ? sidechannelVerifyChannelsRaw
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+  : null;
 const sidechannelWelcomeRaw =
   (flags['sidechannel-welcome'] && String(flags['sidechannel-welcome'])) ||
   env.SIDECHANNEL_WELCOME ||
@@ -388,12 +399,18 @@ if (subnetBootstrap) {
   subnetBootstrap = readHexFile(subnetBootstrapFile, 32);
 }
 
-const msbConfig = createMsbConfig(MSB_ENV.MAINNET, {
+const msbConfigFor = (storesDirectory) => createMsbConfig(MSB_ENV.MAINNET, {
   storeName: msbStoreName,
-  storesDirectory: msbStoresDirectory,
+  storesDirectory,
   enableInteractiveMode: false,
   ...(msbDhtBootstrap ? { dhtBootstrap: msbDhtBootstrap } : {}),
 });
+let msbConfig = msbConfigFor(msbStoresDirectory);
+// trac-msb's config ignores the storeName override (always "mainnet"), so every peer in the same
+// folder would share stores/mainnet and the second one fails on the RocksDB lock. Give each
+// --msb-store-name its own stores directory instead (avoid a name ending in "/admin": MSB treats
+// that directory as admin mode).
+if (msbConfig.storeName !== msbStoreName) msbConfig = msbConfigFor(`${msbStoresDirectory}${msbStoreName}`);
 
 const msbBootstrapHex = b4a.toString(msbConfig.bootstrap, 'hex');
 if (subnetBootstrap && subnetBootstrap === msbBootstrapHex) {
@@ -470,7 +487,7 @@ if (!subnetBootstrap) {
 console.log('');
 console.log('====================INTERCOM ====================');
 const msbChannel = b4a.toString(msbConfig.channel, 'utf8');
-const msbStorePath = path.join(msbStoresDirectory, msbStoreName);
+const msbStorePath = msbConfig.storesFullPath ?? path.join(msbStoresDirectory, msbStoreName);
 const peerStorePath = path.join(peerStoresDirectory, peerStoreNameRaw);
 const peerWriterKey = peer.writerLocalKey ?? peer.base?.local?.key?.toString('hex') ?? null;
 console.log('MSB network bootstrap:', msbBootstrapHex);
@@ -557,6 +574,7 @@ const sidechannel = new Sidechannel(peer, {
   welcomeRequired: sidechannelWelcomeRequired,
   ownerWriteOnly: sidechannelOwnerWriteOnly,
   ownerWriteChannels: sidechannelOwnerWriteChannels || undefined,
+  verifyChannels: sidechannelVerifyChannels || undefined,
   ownerKeys: sidechannelOwnerMap.size > 0 ? sidechannelOwnerMap : undefined,
   welcomeByChannel: sidechannelWelcomeMap.size > 0 ? sidechannelWelcomeMap : undefined,
   onMessage: scBridgeEnabled

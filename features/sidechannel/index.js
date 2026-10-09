@@ -125,6 +125,9 @@ class Sidechannel extends Feature {
       ? new Set(config.ownerWriteChannels.map((c) => normalizeChannel(c)))
       : null;
     this.welcomeRequired = config.welcomeRequired !== false;
+    this.verifyChannels = Array.isArray(config.verifyChannels)
+      ? new Set(config.verifyChannels.map((c) => normalizeChannel(c)))
+      : null;
     this.ownerKeys = new Map();
     const ownerEntries = config.ownerKeys instanceof Map
       ? Array.from(config.ownerKeys.entries())
@@ -826,6 +829,17 @@ class Sidechannel extends Feature {
               console.log(
                 `[sidechannel:${entry.name}] drop (owner-only) author=${author} owner=${ownerKey} sigOk=${sigOk} sigLen=${sigHex.length} hash=${hash} fromRemote=${this._getRemoteKey(connection)}`
               );
+            }
+            return;
+          }
+        }
+        // Verified channels: drop any message whose signature does not match its claimed author,
+        // so apps can trust `from` even for relayed messages.
+        if (this.verifyChannels?.has(normalizeChannel(entry.name)) && !isAuthControl && !isWelcomeControl) {
+          const author = normalizeKeyHex(payload?.from);
+          if (!author || !this._verifySig(payload, author)) {
+            if (this.debug) {
+              console.log(`[sidechannel:${entry.name}] drop (bad author sig) author=${author} fromRemote=${this._getRemoteKey(connection)}`);
             }
             return;
           }

@@ -1,98 +1,91 @@
-# Intercom
+# INBREAZ OTC
 
-This repository is a reference implementation of the **Intercom** stack on Trac Network for an **internet of agents**.
+A peer-to-peer OTC board for TAP Protocol tokens, built on [Trac Intercom](https://github.com/Trac-Systems/intercom).
 
-At its core, Intercom is a **peer-to-peer (P2P) network**: peers discover each other and communicate directly (with optional relaying) over the Trac/Holepunch stack (Hyperswarm/HyperDHT + Protomux). There is no central server required for sidechannel messaging.
+People post offers like "1,000,000 GIB for 250 TAP" on a shared Intercom sidechannel. A taker picks an offer, and both sides settle with TAP `lock` actions of kind `otc` that use a hashlock. Nobody sends first, and nobody holds anyone else's tokens. There is no server, no custody, and the app never sees a private key.
 
-Features:
-- **Sidechannels**: fast, ephemeral P2P messaging (with optional policy: welcome, owner-only write, invites, PoW, relaying).
-- **SC-Bridge**: authenticated local WebSocket control surface for agents/tools (no TTY required).
-- **Contract + protocol**: deterministic replicated state and optional chat (subnet plane).
-- **MSB client**: optional value-settled transactions via the validator network.
+> Status: **v0.1, experimental.** The board, the deal negotiation and the lock/claim builder work over the live Intercom network. Settlement needs two pieces that are not in place yet: a way to sign token-auth redeems from the browser, and a reachable ord-tap indexer. See [Roadmap](#roadmap). Do not trade real value yet.
 
-Additional references: https://www.moltbook.com/post/9ddd5a47-4e8d-4f01-9908-774669a11c21 and moltbook m/intercom
+## How a deal settles
 
-For full, agent‑oriented instructions and operational guidance, **start with `SKILL.md`**.
-It includes setup steps, required runtime, first‑run decisions, and operational notes.
+The swap is atomic. Either both sides get paid, or both sides get a refund.
 
-## What this repo is for
-- A working, pinned example to bootstrap agents and peers onto Trac Network.
-- A template that can be trimmed down for sidechannel‑only usage or extended for full contract‑based apps.
-
-## How to use
-Use the **Intercom Pear runner** (`npm start -- ...`) for peer startup. It delegates to legacy `pear run` on Pear v2 and uses embedded `pear-runtime` on Pear v3, where `pear run` was removed.
-Follow the steps in `SKILL.md` to install dependencies, run the admin peer, and join peers correctly.
-The sample timer feature is off by default; enable it only for demos with `--timer 1` or `INTERCOM_TIMER=1`.
-
-## Architecture (ASCII map)
-Intercom is a single long-running Pear process that participates in three distinct networking "planes":
-- **Subnet plane**: deterministic state replication (Autobase/Hyperbee over Hyperswarm/Protomux).
-- **Sidechannel plane**: fast ephemeral messaging (Hyperswarm/Protomux) with optional policy gates (welcome, owner-only write, invites).
-- **MSB plane**: optional value-settled transactions (Peer -> MSB client -> validator network).
-
-```text
-                          Pear runtime (mandatory)
-                npm start -- --peer-store-name <peer> --msb-store-name <msb>
-                                        |
-                                        v
-  +-------------------------------------------------------------------------+
-  |                            Intercom peer process                         |
-  |                                                                         |
-  |  Local state:                                                          |
-  |  - stores/<peer-store-name>/...   (peer identity, subnet state, etc)    |
-  |  - stores/<msb-store-name>/...    (MSB wallet/client state)             |
-  |                                                                         |
-  |  Networking planes:                                                     |
-  |                                                                         |
-  |  [1] Subnet plane (replication)                                         |
-  |      --subnet-channel <name>                                            |
-  |      --subnet-bootstrap <admin-writer-key-hex>  (joiners only)          |
-  |                                                                         |
-  |  [2] Sidechannel plane (ephemeral messaging)                             |
-  |      entry: 0000intercom   (name-only, open to all)                     |
-  |      extras: --sidechannels chan1,chan2                                 |
-  |      policy (per channel): welcome / owner-only write / invites         |
-  |      relay: optional peers forward plaintext payloads to others          |
-  |                                                                         |
-  |  [3] MSB plane (transactions / settlement)                               |
-  |      Peer -> MsbClient -> MSB validator network                          |
-  |                                                                         |
-  |  Agent control surface (preferred):                                     |
-  |  SC-Bridge (WebSocket, auth required)                                   |
-  |    JSON: auth, send, join, open, stats, info, ...                       |
-  +------------------------------+------------------------------+-----------+
-                                 |                              |
-                                 | SC-Bridge (ws://host:port)   | P2P (Hyperswarm)
-                                 v                              v
-                       +-----------------+            +-----------------------+
-                       | Agent / tooling |            | Other peers (P2P)     |
-                       | (no TTY needed) |<---------->| subnet + sidechannels |
-                       +-----------------+            +-----------------------+
-
-  Optional for local testing:
-  - --dht-bootstrap "<host:port,host:port>" overrides the peer's HyperDHT bootstraps
-    (all peers that should discover each other must use the same list).
-  - Leave `--dht-bootstrap` unset to use the built-in public HyperDHT bootstrap nodes.
+```
+maker (has GIB, wants TAP)                         taker (has TAP, wants GIB)
+1. generates a 32-byte secret S, hash H = sha256(S)
+2. locks GIB → claim: taker, hashlock H, refund after T1 (≈48h)
+                                        3. verifies the maker lock on-chain (ticker, amount, claim address, H, T1)
+                                        4. locks TAP → claim: maker, same H, refund after T2 (≈24h, T2 < T1)
+5. verifies the taker lock, claims it with S
+   (this publishes S on Bitcoin)
+                                        6. reads S from the claim inscription, claims the maker lock before T1
 ```
 
-## Sidechannel runtime knobs
-- Rate limiting is inbound and per connection. Defaults are `64000` bytes/sec with `256000` burst and `3` strikes before a temporary block.
-- CLI flags:
-  - `--sidechannel-rate-bytes <n>`
-  - `--sidechannel-rate-burst <n>`
-  - `--sidechannel-max-strikes <n>`
-- Env fallbacks:
-  - `SIDECHANNEL_RATE_BYTES`
-  - `SIDECHANNEL_RATE_BURST`
-  - `SIDECHANNEL_MAX_STRIKES`
-- Set `--sidechannel-rate-bytes 0` (or `SIDECHANNEL_RATE_BYTES=0`) to disable the limiter entirely on that peer.
+- If the taker never locks, the maker refunds after T1.
+- If the maker never claims, both sides refund: the taker after T2, the maker after T1.
+- T1 is at least 72 blocks after T2. This gives the taker time to claim once S is public.
+- Any account can execute a hashlock claim that carries the right preimage, and the tokens always go to the lock's `claim` address.
 
-## Sample Timer
-- The sample timer feature writes periodic contract entries and is disabled by default.
-- Enable it only when explicitly testing the sample contract timer path:
-  ```bash
-  npm start -- --timer 1 --peer-store-name timer-demo --msb-store-name timer-demo-msb
-  ```
+The locks follow the TAP spec (`token-auth` redeem actions, `lock` / `claim` / `refund`, kind `otc`, `condition.type = "hashlock"`). Preimages are even-length hex and are hashed as raw bytes, the same way ord-tap hashes them.
 
----
-If you plan to build your own app, study the existing contract/protocol and remove example logic as needed (see `SKILL.md`).
+## Why the board can be trusted
+
+- **Authors can't be forged.** Every sidechannel message is signed by its author's peer key. This fork adds `--sidechannel-verify-channels`, which drops any message whose signature does not match its `from` key, including relayed messages.
+- **The channel is owned.** The `inbreaz-otc` channel requires a welcome signed by the board owner. Spam and floods are throttled by Intercom's built-in proof-of-work and rate limits.
+- **Messages are untrusted input.** Offers and deal messages are validated in the UI, and nothing from the wire is executed. A revealed secret is accepted only if it hashes to the deal hash.
+- **No custody.** The app holds nothing that can be stolen. The worst a malicious counterparty can do is waste time, because the refund paths always stay open.
+
+Know before you trade:
+- Board messages are public. The deal amounts and addresses end up on Bitcoin anyway.
+- Always press **Verify lock** against your own or a trusted ord-tap indexer before you lock. A wrong amount, address, hash or refund height is reported.
+- **Back up your deals** (Settings → Download deal backup). The maker's secret is kept in the browser.
+
+## Run it
+
+Requirements: Windows with Node 22 or 23 (avoid Node 24+; a portable Node 22 in `../.tools/node22` is picked up automatically) and git.
+
+```powershell
+npm install
+powershell -ExecutionPolicy Bypass -File .\start-otc.ps1            # your peer + UI on http://127.0.0.1:8787
+```
+
+The script opens the peer in its own console window, starts the local UI and opens the browser. Each start uses a fresh random SC-Bridge token, which is only served to same-origin pages on 127.0.0.1.
+
+To run a second local identity, for example to test both sides of a deal:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-otc.ps1 -Name bob -BridgePort 49223 -UiPort 8788
+```
+
+To run the end-to-end UI test, start both peers first:
+
+```powershell
+node tests/otc-e2e.mjs
+```
+
+### Setting up your own board
+
+`otc/channel.json` holds the channel name, the owner peer key and the owner-signed welcome. To start an independent board:
+1. Run a peer with `--sc-bridge-cli 1`.
+2. Run `node scripts/otc-welcome.mjs <bridge-token>`.
+
+## What this fork changes in Intercom
+
+- `--sidechannel-verify-channels <a,b>`: rejects messages whose author signature does not verify, so apps can trust `from`.
+- MSB store isolation: trac-msb ignores the `storeName` override, so every peer in one folder shared `stores/mainnet` and a second peer crashed on the RocksDB lock. Each `--msb-store-name` now gets its own directory.
+- `otc/`: the board UI and TAP settlement helpers (`otc/tap.js`).
+- `scripts/otc-ui.mjs`, `scripts/otc-welcome.mjs`, `start-otc.ps1`: local UI server and launch scripts.
+
+The original Intercom documentation is in [docs/INTERCOM.md](docs/INTERCOM.md) and [SKILL.md](SKILL.md).
+
+## Roadmap
+
+- **Browser signing of token-auth redeems.** TAP Wallet already signs redeems internally. Exposing a "sign this redeem" request to sites, with a clear approval screen, would make settlement one click.
+- **Public ord-tap endpoint** support for lock verification and secret discovery (`/r/tap/getLock`, `/r/tap/getLockConsume`, `/content/<id>`).
+- Reputation: completed deals per peer key.
+- TAP ↔ BTC over Lightning, with the same hash used as the invoice payment hash (`kind: "htlc"`).
+- DMT elements and Bitmap parcels via PSBT offers.
+
+## License
+
+Same as upstream Intercom (see [LICENSE.md](LICENSE.md)).
