@@ -3,3 +3,4 @@ node_modules
 skill-oc.md
 skill-sc.md
 otc/welcome.b64
+agent/outbox/
