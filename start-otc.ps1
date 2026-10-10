@@ -27,10 +27,13 @@ $peerArgs = @(
   "--sidechannels", $ch.channel, "--sidechannel-owner", "$($ch.channel):$($ch.owner)",
   "--sidechannel-welcome", "$($ch.channel):@./otc/welcome.b64", "--sidechannel-verify-channels", $ch.channel
 ) -join ' '
-$pathLine = "`$env:PATH='$env:PATH'"
+# Keep the window command short: Windows Terminal (default console on Windows 11) drops long command lines.
+$pathLine = if (Test-Path (Join-Path $portable "node.exe")) { "`$env:PATH='$portable;'+`$env:PATH" } else { "" }
+$logDir = Join-Path (Split-Path $here -Parent) ".tools\logs"
+New-Item -ItemType Directory -Force $logDir | Out-Null
 # Bot peers run minimized (still a real console window, which the peer needs).
 $peerStyle = if ($Bot) { "Minimized" } else { "Normal" }
-Start-Process powershell -WindowStyle $peerStyle -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI peer ($Name)'; npm start -- $peerArgs"
+Start-Process powershell -WindowStyle $peerStyle -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI peer ($Name)'; npm start -- $peerArgs 2>&1 | Tee-Object -FilePath '$logDir\peer-$Name.log'"
 if ($Bot) {
   # The bot waits a little for the peer's bridge, then trades through it.
   $botLine = "Start-Sleep 20; node agent/run-bot.mjs '$Bot' $token $BridgePort"
