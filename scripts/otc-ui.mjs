@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../otc/', import.meta.url));
-const [token, bridgePort = '49222', uiPort = '8787'] = process.argv.slice(2);
+const [token, bridgePort = '49232', uiPort = '8787'] = process.argv.slice(2);
 if (!token) { console.error('usage: node scripts/otc-ui.mjs <bridge-token> [bridge-port] [ui-port]'); process.exit(1); }
 const channel = JSON.parse(fs.readFileSync(path.join(root, 'channel.json'), 'utf8'));
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css', '.svg': 'image/svg+xml' };

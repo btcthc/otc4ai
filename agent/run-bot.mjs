@@ -9,7 +9,7 @@ import { STRATEGIES } from './bots.mjs';
 import { feeModel } from './fees.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const [cfgPath, token, port = '49222'] = process.argv.slice(2);
+const [cfgPath, token, port = '49232'] = process.argv.slice(2);
 if (!cfgPath || !token) { console.error('usage: node agent/run-bot.mjs <config.json> <bridge-token> [bridge-port]'); process.exit(1); }
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const channel = JSON.parse(fs.readFileSync(path.join(root, 'otc/channel.json'), 'utf8')).channel;

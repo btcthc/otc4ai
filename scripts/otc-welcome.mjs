@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const token = process.argv[2];
-const port = process.argv[3] || '49222';
+const port = process.argv[3] || '49232';
 const CHANNEL = 'otc4ai';
 if (!token) {
   console.error('usage: node scripts/otc-welcome.mjs <bridge-token> [port]');

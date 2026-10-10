@@ -1,7 +1,7 @@
-# Starts your OTC4AI peer (own console window) and the local web UI, then opens the browser.
-# Usage:  powershell -ExecutionPolicy Bypass -File .\start-otc.ps1 [-Name admin] [-BridgePort 49222] [-UiPort 8787]
+﻿# Starts your OTC4AI peer (own console window) and the local web UI, then opens the browser.
+# Usage:  powershell -ExecutionPolicy Bypass -File .\start-otc.ps1 [-Name admin] [-BridgePort 49232] [-UiPort 8787]
 #         add -Bot agent\configs\mm-1.json to run a trading bot on this peer instead of the web UI
-param([string]$Name = "admin", [int]$BridgePort = 49222, [int]$UiPort = 8787, [string]$Bot = "", [switch]$NoBrowser)
+param([string]$Name = "admin", [int]$BridgePort = 49232, [int]$UiPort = 8787, [string]$Bot = "", [switch]$NoBrowser)
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
 Set-Location $here
