@@ -44,7 +44,7 @@ export function marketMaker(cfg, agent, log) {
   try { if (cfg.statePath) vol = JSON.parse(fs.readFileSync(cfg.statePath, 'utf8')).volume || {}; } catch {}
   const saveVol = () => { try { if (cfg.statePath) fs.writeFileSync(cfg.statePath, JSON.stringify({ volume: vol }, null, 2)); } catch {} };
   const discount = (addr) => tiers.find((t) => (vol[addr] || 0) >= t.usd)?.discount || 0;
-  const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p }]));
+  const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p, anchor: p.mid }]));
   const score = scoreboard(cfg, inv, fees, (t) => (t === 'tap' ? 1 : [...P.values()].find((p) => p.base === t)?.mid ?? 0));
   const posted = new Map();
   const has = (tick, amt) => (inv[tick] ?? 0) >= amt;
@@ -104,6 +104,7 @@ export function marketMaker(cfg, agent, log) {
       const minBase = fees.quote().minNotionalUsd / Math.max(1e-12, fees.usdOf(p.mid, p.quote));
       if (p.size < minBase) p.size = Math.ceil(minBase * 1.1);
       p.mid *= 1 + (Math.random() - 0.5) * (cfg.drift ?? 0.004);
+      p.mid += (p.anchor - p.mid) * (cfg.reversion ?? 0.02); // pull back toward the configured mid, so takers with price limits keep trading
       for (const side of ['buy', 'sell']) {
         const old = posted.get(p.base + side);
         if (old) agent.cancelOffer(old.oid);

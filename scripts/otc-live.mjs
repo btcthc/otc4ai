@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { standings, seasonStatus } from '../agent/arena.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const UI = arg('ui', 'http://127.0.0.1:8787'), GIST = arg('gist', ''), EVERY = Number(arg('every', 60));
@@ -15,6 +16,31 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const out = path.join(root, 'docs/live/snapshot.json');
 const GH = process.platform === 'win32' ? 'C:\\Program Files\\GitHub CLI\\gh.exe' : 'gh';
 const log = (s) => console.log(new Date().toISOString().slice(11, 19), s);
+
+// Arena season (docs/arena.json): settled deals that involve a non-house agent are kept on disk for the
+// whole season, so standings survive restarts. Peer keys stay in that local file; the snapshot shows names.
+const arenaCfg = () => { try { return JSON.parse(fs.readFileSync(path.join(root, 'docs/arena.json'), 'utf8')); } catch { return null; } };
+const stateDir = path.join(root, 'agent/state');
+const seasonFile = (n) => path.join(stateDir, `arena-s${n}.jsonl`);
+const seasonDeals = (() => { const c = arenaCfg(); try { return fs.readFileSync(seasonFile(c.season), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
+function recordSeasonDeal(d) {
+  const c = arenaCfg(); if (!c || seasonStatus(c, d.t) !== 'live') return;
+  const house = new Set((c.house || []).map((h) => h.peer));
+  if (house.has(d.makerKey) && house.has(d.takerKey)) return; // house vs house never scores
+  const row = { t: d.t, pair: d.pair, maker: d.makerKey, taker: d.takerKey, give: d.give, want: d.want };
+  seasonDeals.push(row);
+  try { fs.mkdirSync(stateDir, { recursive: true }); fs.appendFileSync(seasonFile(c.season), JSON.stringify(row) + '\n'); } catch (e) { log('cannot save season deal: ' + e.message); }
+}
+function arenaSnapshot(prices) {
+  const c = arenaCfg(); if (!c) return null;
+  const status = seasonStatus(c), endFile = path.join(stateDir, `arena-s${c.season}-end-prices.json`);
+  let marks = { ...(c.marks || {}), ...prices }; // configured marks fill in until a pair has traded
+  if (status === 'finished') { // freeze the marks once, at the first publish after the end
+    try { marks = JSON.parse(fs.readFileSync(endFile, 'utf8')); } catch { try { fs.mkdirSync(stateDir, { recursive: true }); fs.writeFileSync(endFile, JSON.stringify(prices)); } catch {} }
+  }
+  return { season: c.season, name: c.name, status, start: c.start, end: c.end, prize: c.prize, split: c.split, minDeals: c.minDeals,
+    house: (c.house || []).map((h) => h.name), registered: (c.participants || []).length, standings: standings(c, seasonDeals, marks) };
+}
 
 const agents = new Map();      // peer -> { name, pairs, perks, stats, minUsd, feeUsd, satPerVb, modes, seen }
 const offers = new Map();      // oid -> { offer, from, seen }
@@ -40,10 +66,10 @@ function onMsg(from, m) {
     const e = quotes.get(m.oid) || offers.get(m.oid);
     if (!e) return;
     const { b, q } = pairOf(e.offer);
-    deals.set(m.did, { pair: `${b.tick}/${q.tick}`, base: b.amt, quote: q.amt, price: Number(q.amt) / Number(b.amt), maker: name(e.from), taker: name(from), state: 'taken', t: Date.now() });
+    deals.set(m.did, { pair: `${b.tick}/${q.tick}`, base: b.amt, quote: q.amt, price: Number(q.amt) / Number(b.amt), maker: name(e.from), taker: name(from), makerKey: e.from, takerKey: from, give: e.offer.give, want: e.offer.want, state: 'taken', t: Date.now() });
     push({ k: 'take', who: name(from), text: `takes ${b.amt} ${b.tick} ⇄ ${q.amt} ${q.tick} from ${name(e.from)}` });
   } else if (m.t === 'claimed' && deals.has(m.did)) {
-    const d = deals.get(m.did); d.state = 'done'; d.t = Date.now();
+    const d = deals.get(m.did); d.state = 'done'; d.t = Date.now(); recordSeasonDeal(d);
     push({ k: 'done', who: d.maker, text: `deal settled: ${d.base} ${d.pair.split('/')[0]} @ ${d.price.toPrecision(4)} ${d.pair.split('/')[1]}${m.sponsored ? ' · maker paid the client claim' : ''}` });
   } else if (m.t === 'locked' && deals.has(m.did)) push({ k: 'lock', who: name(from), text: `${m.side} locked (hashlock)` });
 }
@@ -64,6 +90,7 @@ function snapshot() {
     prices: last,
     day: { deals: done.length, volumeTap: Math.round(done.reduce((s, d) => s + (d.pair.endsWith('/tap') ? Number(d.quote) : 0), 0)) },
     events: events.slice(0, 40),
+    arena: arenaSnapshot(Object.fromEntries(Object.entries(last).map(([k, v]) => [k, v.price]))),
   };
 }
 
