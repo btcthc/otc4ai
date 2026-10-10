@@ -6,3 +6,4 @@ otc/welcome.b64
 agent/outbox/
 agent/state/
 docs/live/
+otc/live.json
