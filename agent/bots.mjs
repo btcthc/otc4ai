@@ -1,4 +1,5 @@
-import { feeModel } from './fees.mjs';
+import fs from 'node:fs';
+import { feeModel, VBYTES } from './fees.mjs';
 
 // Example strategies. A policy tells the engine what to quote and whether to accept a deal;
 // the bot loop decides what to post or take. Inventory is tracked locally (paper mode = simulated).
@@ -11,14 +12,21 @@ export const fmt = (x) => {
 // Market maker: quotes around a mid price with a spread, keeps a bid and an ask on the board.
 export function marketMaker(cfg, agent, log) {
   const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
+  // Loyalty: traded volume per client address (USD), persisted so discounts survive restarts.
+  // cfg.tiers = [{ usd: 1000, discount: 0.25 }, ...] cuts the spread once a client has traded that much.
+  const tiers = [...(cfg.tiers || [])].sort((a, b) => b.usd - a.usd);
+  let vol = {};
+  try { if (cfg.statePath) vol = JSON.parse(fs.readFileSync(cfg.statePath, 'utf8')).volume || {}; } catch {}
+  const saveVol = () => { try { if (cfg.statePath) fs.writeFileSync(cfg.statePath, JSON.stringify({ volume: vol }, null, 2)); } catch {} };
+  const discount = (addr) => tiers.find((t) => (vol[addr] || 0) >= t.usd)?.discount || 0;
   const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p }]));
   const posted = new Map();
   const has = (tick, amt) => (inv[tick] ?? 0) >= amt;
-  const legs = (p, side, amt) => {
+  const legs = (p, side, amt, addr) => {
     // side is the requester's view: 'buy' = they buy base from me.
     // passFees: my network fee is added to the price, so it is a bigger share of small trades
     // and almost nothing on big ones.
-    const edge = p.spread / 2 + (cfg.passFees ? fees.quote().usd / Math.max(1e-9, usd(p, amt)) : 0);
+    const edge = (p.spread / 2) * (1 - discount(addr)) + (cfg.passFees ? fees.quote().usd / Math.max(1e-9, usd(p, amt)) : 0);
     const px = side === 'buy' ? p.mid * (1 + edge) : p.mid * (1 - edge);
     const quoteAmt = amt * px;
     return side === 'buy'
@@ -30,12 +38,17 @@ export function marketMaker(cfg, agent, log) {
   const bigEnough = (p, baseAmt) => usd(p, baseAmt) >= fees.quote().minNotionalUsd;
   const policy = {
     pairs: () => [...P.keys()],
-    info: () => { const q = fees.quote(); return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb }; },
-    quote({ side, tick, against, amt }) {
+    info: () => {
+      const q = fees.quote();
+      return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb,
+        perks: { freeClaim: !!cfg.sponsorClaims, tiers: tiers.map((t) => ({ usd: t.usd, discount: t.discount })).reverse() } };
+    },
+    sponsorClaims: () => !!cfg.sponsorClaims,
+    quote({ side, tick, against, amt, addr }) {
       const p = P.get(`${tick}/${against}`);
       if (!p || !['buy', 'sell'].includes(side)) return null;
       if (amt > p.maxBase || fees.paused() || !bigEnough(p, amt)) { log(`no quote for ${amt} ${tick}: ${amt > p.maxBase ? 'above max size' : fees.paused() ? 'network fee too high' : 'below the fee-efficient minimum'}`); return null; }
-      const l = legs(p, side, amt);
+      const l = legs(p, side, amt, addr);
       if (!l.give.amt || !l.want.amt || !has(...l.gives)) return null;
       return { give: l.give, want: l.want };
     },
@@ -44,6 +57,13 @@ export function marketMaker(cfg, agent, log) {
       const [out, inn] = d.role === 'maker' ? [d.offer.give, d.offer.want] : [d.offer.want, d.offer.give];
       inv[out.tick] = (inv[out.tick] ?? 0) - Number(out.amt);
       inv[inn.tick] = (inv[inn.tick] ?? 0) + Number(inn.amt);
+      const client = d.role === 'maker' ? d.takerAddr : d.offer.addr;
+      const tapLeg = [out, inn].find((x) => x.tick === 'tap');
+      if (client && tapLeg) {
+        const before = discount(client);
+        vol[client] = (vol[client] || 0) + fees.usdOf(Number(tapLeg.amt), 'tap'); saveVol();
+        if (discount(client) > before) log(`client ${client.slice(0, 10)}… reached $${Math.round(vol[client])} volume: spread discount now ${discount(client) * 100}%`);
+      }
       // fees are booked per inscription (fees.charge), so batching shows up in the paper P&L
       const st = fees.st, avg = st.inscriptions ? st.actions / st.inscriptions : 1;
       log(`inventory ${JSON.stringify(roundInv(inv))} · network fees so far $${st.spentUsd.toFixed(2)} (${st.inscriptions} inscriptions, ${avg.toFixed(1)} actions each)`);
@@ -91,13 +111,21 @@ export function taker(cfg, agent, log) {
     const lo = Math.max(p.minBase, minBase), hi = Math.max(p.maxBase, lo);
     const amt = Math.round(lo + Math.random() * (hi - lo));
     const quotes = await agent.requestQuotes({ side, tick: p.base, against: p.quote, amt });
-    const priced = quotes.map((q) => ({ q, px: side === 'buy' ? Number(q.offer.want.amt) / Number(q.offer.give.amt) : Number(q.offer.give.amt) / Number(q.offer.want.amt) }));
+    // Compare quotes by what the trade really costs: add our own claim fee unless the maker pays it.
+    const claimUsd = ((VBYTES.inscription + VBYTES.action) * fees.st.satPerVb / 1e8) * fees.st.btcUsd;
+    const notionalUsd = fees.usdOf(amt * p.maxPrice, p.quote);
+    const priced = quotes.map((q) => {
+      const px = side === 'buy' ? Number(q.offer.want.amt) / Number(q.offer.give.amt) : Number(q.offer.give.amt) / Number(q.offer.want.amt);
+      const free = agent.agents.get(q.from)?.agent?.perks?.freeClaim;
+      const adj = free ? 0 : claimUsd / Math.max(1e-9, notionalUsd);
+      return { q, px: side === 'buy' ? px * (1 + adj) : px * (1 - adj), free };
+    });
     const ok = priced.filter(({ px }) => (side === 'buy' ? px <= p.maxPrice : px >= p.minPrice));
     log(`rfq ${side} ${amt} ${p.base}: ${quotes.length} quote(s)${ok.length ? '' : ', none within limit'}`);
     if (!ok.length) return;
     ok.sort((a, b) => (side === 'buy' ? a.px - b.px : b.px - a.px));
     const best = ok[0];
-    log(`taking ${best.q.offer.give.amt} ${best.q.offer.give.tick} for ${best.q.offer.want.amt} ${best.q.offer.want.tick} @ ${best.px.toPrecision(5)}`);
+    log(`taking ${best.q.offer.give.amt} ${best.q.offer.give.tick} for ${best.q.offer.want.amt} ${best.q.offer.want.tick} @ ${best.px.toPrecision(5)} (effective${best.free ? ', maker pays our claim' : ''})`);
     agent.take(best.q);
   };
   return { policy, start: () => { setTimeout(round, 8000); return setInterval(() => round().catch((e) => log('round error ' + e.message)), (cfg.everySec ?? 40) * 1000); }, inv };

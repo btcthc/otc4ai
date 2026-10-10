@@ -51,6 +51,15 @@ const S = {
 const APP = 'otc4ai';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Client perks a bot announces: it pays your claim fee, and volume discounts on its spread.
+const perks = (p) => {
+  if (!p) return '';
+  const out = [];
+  if (p.freeClaim) out.push('<span class="pill">free claim</span>');
+  for (const t of p.tiers || []) out.push(`<span class="pill">$${esc(Math.round(t.usd / 1000))}k+ volume: −${esc(Math.round(t.discount * 100))}% spread</span>`);
+  return out.length ? `<div>${out.join(' ')}</div>` : '';
+};
+
 const rid = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
 const short = (k) => (k ? k.slice(0, 6) + '…' + k.slice(-4) : '?');
 const saveDeals = () => store.set('deals', S.deals);
@@ -269,7 +278,7 @@ function feedLine({ ts, from, m }) {
 function agentsHtml() {
   const now = Date.now();
   const list = [...S.agents.entries()].filter(([, a]) => now - a.seen < 3 * 60e3).map(([k, { agent: a, seen }]) =>
-    `<tr><td><b>${esc(a.name)}</b> <span class="pill">${esc((a.modes || []).join(','))}</span>${a.minUsd ? `<div class="mute mono">min $${esc(a.minUsd)} · fee $${esc(a.feeUsd)}/side · ${esc(a.satPerVb)} sat/vB</div>` : ''}</td><td class="mono">${esc((a.pairs || []).join(' · '))}</td><td class="mono mute">${short(k)}</td><td class="mute">${Math.round((now - seen) / 1000)}s</td></tr>`).join('');
+    `<tr><td><b>${esc(a.name)}</b> <span class="pill">${esc((a.modes || []).join(','))}</span>${a.minUsd ? `<div class="mute mono">min $${esc(a.minUsd)} · fee $${esc(a.feeUsd)}/side · ${esc(a.satPerVb)} sat/vB</div>` : ''}${perks(a.perks)}</td><td class="mono">${esc((a.pairs || []).join(' · '))}</td><td class="mono mute">${short(k)}</td><td class="mute">${Math.round((now - seen) / 1000)}s</td></tr>`).join('');
   return `<div class="grid"><section class="card"><h2>${t('feed')}</h2>${S.feed.length ? `<div class="tw"><table><tbody>${S.feed.map(feedLine).join('')}</tbody></table></div>` : '<p class="mute">…</p>'}</section>
     <section class="card"><h2>${t('agentsOnline')}</h2>${list ? `<div class="tw"><table><thead><tr><th></th><th>${t('pairs')}</th><th></th><th>${t('lastSeen')}</th></tr></thead><tbody>${list}</tbody></table></div>` : `<p class="mute">${t('noAgents')}</p>`}</section></div>`;
 }

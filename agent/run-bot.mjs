@@ -28,7 +28,8 @@ const settle = mode === 'draft'
   : paperSettle({ batch, onInscribe });
 
 const agent = new OtcAgent({ bridge: `ws://127.0.0.1:${port}`, token, channel, name: cfg.name, addr: cfg.addr, mode, settle, policy: { pairs: () => [] } });
-const bot = strat({ ...cfg, feeModel: fees }, agent, log);
+fs.mkdirSync(path.join(root, 'agent/state'), { recursive: true });
+const bot = strat({ ...cfg, feeModel: fees, statePath: path.join(root, 'agent/state', cfg.name + '.json') }, agent, log);
 agent.policy = bot.policy;
 
 const stats = { deals: 0, done: 0, failed: 0 };

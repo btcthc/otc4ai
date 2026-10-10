@@ -109,7 +109,7 @@ export class OtcAgent extends EventEmitter {
   async onRfq(from, m) {
     if (typeof m.rfq !== 'string' || !tap.isTick(m.tick) || !tap.isTick(m.against) || !tap.isAmt(m.amt) || !tap.isAddr(m.addr)) return;
     if ((m.mode || 'paper') !== this.mode) return;
-    const q = this.policy.quote?.({ side: m.side, tick: m.tick.toLowerCase(), against: m.against.toLowerCase(), amt: Number(m.amt), from });
+    const q = this.policy.quote?.({ side: m.side, tick: m.tick.toLowerCase(), against: m.against.toLowerCase(), amt: Number(m.amt), from, addr: m.addr });
     if (!q) return;
     const offer = { oid: rid(), give: q.give, want: q.want, addr: this.addr, exp: Date.now() + 120e3, note: 'quote', mode: this.mode, private: true };
     if (!validOffer(offer)) return;
@@ -156,6 +156,9 @@ export class OtcAgent extends EventEmitter {
       } else if (m.t === 'claimed' && d.state === 'takerLocked' && typeof m.preimage === 'string') {
         if ((await tap.hashOf(m.preimage.toLowerCase()).catch(() => '')) !== d.hash) return; // ignore bad secrets
         d.preimage = m.preimage.toLowerCase();
+        // The maker may submit our claim for us (anyone can submit a hashlock claim; the tokens
+        // always go to the lock's claim address). We still claim ourselves if it does not show up.
+        if (m.sponsored === d.makerLock && (await this.settle.awaitClaim?.(d, d.makerLock))) return this.finish(d, 'done', 'claim paid by the maker');
         await this.settle.claim(d, d.makerLock, d.preimage);
         this.finish(d, 'done');
       }
@@ -163,8 +166,10 @@ export class OtcAgent extends EventEmitter {
       d.takerLock = m.lock;
       const v = await this.settle.verify(d, 'taker', m.lock);
       if (!v.ok) return this.emit('log', `deal ${d.id}: taker lock rejected (${v.problems.join('; ')}); will refund after ${d.t1}`);
-      await this.settle.claim(d, d.takerLock, d.secret);
-      this.send({ t: 'claimed', did: d.id, to: from, side: 'maker', lock: d.takerLock, preimage: d.secret });
+      // perk: also submit the taker's claim in the same batch, so the client pays no claim fee
+      const sponsor = !!this.policy.sponsorClaims?.(d);
+      await Promise.all([this.settle.claim(d, d.takerLock, d.secret), sponsor && this.settle.claim(d, d.makerLock, d.secret)]);
+      this.send({ t: 'claimed', did: d.id, to: from, side: 'maker', lock: d.takerLock, preimage: d.secret, ...(sponsor ? { sponsored: d.makerLock } : {}) });
       this.finish(d, 'done');
     }
   }

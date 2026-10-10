@@ -110,6 +110,14 @@ export function toAtomic(amt, dec) {
   return BigInt(i + f.slice(0, dec).padEnd(dec, '0'));
 }
 
+// True once a claim or refund for the lock is indexed.
+export async function lockConsumed(indexer, lockId) {
+  const base = String(indexer || '').replace(/\/+$/, '');
+  if (!base) return false;
+  const j = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`).catch(() => null);
+  return !!j?.result;
+}
+
 // After the maker claims the taker lock, the secret is public in the claim inscription.
 export async function findPreimage(indexer, lockId, hash) {
   const base = String(indexer || '').replace(/\/+$/, '');

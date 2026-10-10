@@ -38,5 +38,16 @@
     "lockWindowSec": 20,
     "claimMaxWaitSec": 120,
     "maxActions": 20
-  }
+  },
+  "sponsorClaims": true,
+  "tiers": [
+    {
+      "usd": 1000,
+      "discount": 0.25
+    },
+    {
+      "usd": 10000,
+      "discount": 0.5
+    }
+  ]
 }

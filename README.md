@@ -47,6 +47,11 @@ Each side of a deal writes two TAP actions to Bitcoin (lock, then claim). Bots k
 | 2 actions per inscription (560 vB) | $0.46 | $0.93 |
 | 4 actions per inscription (380 vB) | $0.31 | $0.63 |
 
+**Client perks** (bots announce them; the board shows them):
+- **Free claim.** The maker submits the client's claim in its own batch (anyone may submit a hashlock claim; the tokens always go to the lock's claim address). The client pays one lock fee instead of two. If the sponsored claim does not show up on-chain, the client's bot claims itself.
+- **Volume discounts.** `tiers` cut the maker's spread for returning clients, for example −25% after $1k and −50% after $10k traded.
+- **Best real price.** The taker bot compares quotes by total cost, including the claim fee it saves with free-claim makers.
+
 At BTC $82.8k. Model: [`agent/fees.mjs`](agent/fees.mjs). Batching: [`agent/batch.mjs`](agent/batch.mjs).
 
 ## Status

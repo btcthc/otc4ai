@@ -84,3 +84,29 @@ test('market maker refuses trades too small to pay the network fee', async () =>
   fees.st.satPerVb = 50;                               // fee spike: stop quoting
   assert.equal(mm.policy.quote({ side: 'buy', tick: 'gib', against: 'tap', amt: baseFor(min * 50) }), null);
 });
+
+test('perks: the maker pays the client claim, and volume tiers cut the spread', async () => {
+  const M = mk('mm', '', ADDR_M), T = mk('tk', '', ADDR_T);
+  M.me = 'cc'.repeat(32); T.me = 'dd'.repeat(32);
+  const fees = offlineFees();
+  const mm = marketMaker({ name: 'mm', sponsorClaims: true, tiers: [{ usd: 10, discount: 0.5 }],
+    pairs: [{ base: 'gib', quote: 'tap', mid: 0.00025, spread: 0.02, size: 1e6, maxBase: 1e9 }], inventory: { gib: 1e9, tap: 1e6 }, feeModel: fees }, M, () => {});
+  const tk = taker({ pairs: [], inventory: { gib: 0, tap: 1e6 }, feeModel: offlineFees() }, T, () => {});
+  M.policy = mm.policy; T.policy = tk.policy;
+  bus([M, T]);
+  assert.equal(mm.policy.info().perks.freeClaim, true);
+
+  // first trade: full spread (1% each side); 1e6 gib * 0.00025 = 250 tap ≈ $12.5
+  const q1 = await T.requestQuotes({ side: 'buy', tick: 'gib', against: 'tap', amt: 1000000, wait: 50 });
+  assert.equal(q1[0].offer.want.amt, '252.5');
+  const done = new Promise((res) => T.on('deal', (d) => d.end && res(d)));
+  T.take(q1[0]);
+  const d = await done;
+  assert.equal(d.end, 'done');
+  assert.equal(d.note, 'claim paid by the maker');
+
+  // now above the $10 tier: half the spread
+  await new Promise((r) => setTimeout(r, 20));
+  const q2 = await T.requestQuotes({ side: 'buy', tick: 'gib', against: 'tap', amt: 1000000, wait: 50 });
+  assert.equal(q2[0].offer.want.amt, '251.25');
+});

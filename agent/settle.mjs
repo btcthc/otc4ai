@@ -20,6 +20,7 @@ export function paperSettle({ batch = null, onInscribe = () => {} } = {}) {
     lock: async (d, side) => { await b.add(tap.dealLegs(d)[side], 'lock'); return `paper:${d.id}:${side}`; },
     verify: async (d, side, id) => (id === `paper:${d.id}:${side}` ? { ok: true, problems: [] } : { ok: false, problems: ['wrong paper lock id'] }),
     claim: async (d, lockId, preimage) => { await b.add(tap.claimAction(lockId, preimage), 'claim'); return true; },
+    awaitClaim: async () => true, // paper: the maker's sponsored claim is simulated
   };
 }
 
@@ -51,5 +52,14 @@ export function draftSettle({ outbox, auth, indexer, batch = null, onInscribe = 
     lock: async (d, side) => (await b.add(tap.dealLegs(d)[side], 'lock')).id,
     verify: (d, side, id) => tap.verifyLock(indexer, id, tap.dealLegs(d)[side]),
     claim: async (d, lockId, preimage) => { await b.add(tap.claimAction(lockId, preimage), 'claim'); return true; },
+    // Wait for a claim submitted by the counterparty; false means "claim it yourself".
+    async awaitClaim(d, lockId, ms = 3 * 3600e3) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if (await tap.lockConsumed(indexer, lockId)) return true;
+        await new Promise((r) => setTimeout(r, 60e3));
+      }
+      return false;
+    },
   };
 }
