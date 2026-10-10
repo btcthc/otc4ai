@@ -9,6 +9,31 @@ export const fmt = (x) => {
   return s === '0' ? null : s;
 };
 
+// Arena scoreboard: deals, volume and paper P&L (inventory change marked at the current price,
+// minus network fees). Saved next to the bot state so restarts keep the score and the inventory.
+function scoreboard(cfg, inv, fees, priceInTap) {
+  const file = cfg.statePath && cfg.statePath.replace(/\.json$/, '-score.json');
+  let s = { start: { ...inv }, deals: 0, volumeUsd: 0, feesBefore: 0, since: Date.now() };
+  try { if (file) { const saved = JSON.parse(fs.readFileSync(file, 'utf8')); s = { ...s, ...saved, feesBefore: saved.feesUsd || 0 }; Object.assign(inv, saved.inv || {}); } } catch {}
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const stats = () => {
+    let pnlTap = 0;
+    for (const t of new Set([...Object.keys(s.start), ...Object.keys(inv)])) pnlTap += ((inv[t] ?? 0) - (s.start[t] ?? 0)) * priceInTap(t);
+    const feesUsd = s.feesBefore + fees.st.spentUsd;
+    return { deals: s.deals, volumeUsd: r2(s.volumeUsd), pnlUsd: r2(fees.usdOf(pnlTap, 'tap') - feesUsd), feesUsd: r2(feesUsd), since: s.since };
+  };
+  const save = () => { try { if (file) fs.writeFileSync(file, JSON.stringify({ start: s.start, inv, deals: s.deals, volumeUsd: s.volumeUsd, feesUsd: stats().feesUsd, since: s.since }, null, 2)); } catch {} };
+  return {
+    stats,
+    record(d) {
+      s.deals++;
+      const leg = [d.offer.give, d.offer.want].find((x) => x.tick === 'tap');
+      if (leg) s.volumeUsd += fees.usdOf(Number(leg.amt), 'tap');
+      save();
+    },
+  };
+}
+
 // Market maker: quotes around a mid price with a spread, keeps a bid and an ask on the board.
 export function marketMaker(cfg, agent, log) {
   const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
@@ -20,6 +45,7 @@ export function marketMaker(cfg, agent, log) {
   const saveVol = () => { try { if (cfg.statePath) fs.writeFileSync(cfg.statePath, JSON.stringify({ volume: vol }, null, 2)); } catch {} };
   const discount = (addr) => tiers.find((t) => (vol[addr] || 0) >= t.usd)?.discount || 0;
   const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p }]));
+  const score = scoreboard(cfg, inv, fees, (t) => (t === 'tap' ? 1 : [...P.values()].find((p) => p.base === t)?.mid ?? 0));
   const posted = new Map();
   const has = (tick, amt) => (inv[tick] ?? 0) >= amt;
   const legs = (p, side, amt, addr) => {
@@ -41,7 +67,7 @@ export function marketMaker(cfg, agent, log) {
     info: () => {
       const q = fees.quote();
       return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb,
-        perks: { freeClaim: !!cfg.sponsorClaims, tiers: tiers.map((t) => ({ usd: t.usd, discount: t.discount })).reverse() } };
+        perks: { freeClaim: !!cfg.sponsorClaims, tiers: tiers.map((t) => ({ usd: t.usd, discount: t.discount })).reverse() }, stats: score.stats() };
     },
     sponsorClaims: () => !!cfg.sponsorClaims,
     quote({ side, tick, against, amt, addr }) {
@@ -64,6 +90,7 @@ export function marketMaker(cfg, agent, log) {
         vol[client] = (vol[client] || 0) + fees.usdOf(Number(tapLeg.amt), 'tap'); saveVol();
         if (discount(client) > before) log(`client ${client.slice(0, 10)}… reached $${Math.round(vol[client])} volume: spread discount now ${discount(client) * 100}%`);
       }
+      score.record(d);
       // fees are booked per inscription (fees.charge), so batching shows up in the paper P&L
       const st = fees.st, avg = st.inscriptions ? st.actions / st.inscriptions : 1;
       log(`inventory ${JSON.stringify(roundInv(inv))} · network fees so far $${st.spentUsd.toFixed(2)} (${st.inscriptions} inscriptions, ${avg.toFixed(1)} actions each)`);
@@ -85,20 +112,26 @@ export function marketMaker(cfg, agent, log) {
       }
     }
   };
-  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv, fees, feesUsd: () => fees.st.spentUsd };
+  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv, fees, feesUsd: () => fees.st.spentUsd, stats: score.stats };
 }
 
 // Taker: every N seconds asks for quotes on a random size and takes the best one if it is within its limit.
 export function taker(cfg, agent, log) {
   const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
+  // mark inventory at the last price it traded at (or the middle of its price limits)
+  const last = Object.fromEntries((cfg.pairs || []).map((p) => [p.base, (p.minPrice + p.maxPrice) / 2]));
+  const score = scoreboard(cfg, inv, fees, (t) => (t === 'tap' ? 1 : last[t] ?? 0));
   const policy = {
     pairs: () => cfg.pairs.map((p) => `${p.base}/${p.quote}`),
-    info: () => { const q = fees.quote(); return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb }; },
+    info: () => { const q = fees.quote(); return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb, stats: score.stats() }; },
     approve: () => false, // posts no offers of its own
     settled(d) {
       inv[d.offer.want.tick] = (inv[d.offer.want.tick] ?? 0) - Number(d.offer.want.amt);
       inv[d.offer.give.tick] = (inv[d.offer.give.tick] ?? 0) + Number(d.offer.give.amt);
-      log(`inventory ${JSON.stringify(roundInv(inv))}`);
+      const base = [d.offer.give, d.offer.want].find((x) => x.tick !== 'tap'), q = [d.offer.give, d.offer.want].find((x) => x.tick === 'tap');
+      if (base && q) last[base.tick] = Number(q.amt) / Number(base.amt);
+      score.record(d);
+      log(`inventory ${JSON.stringify(roundInv(inv))} · score ${JSON.stringify(score.stats())}`);
     },
   };
   const round = async () => {
@@ -128,7 +161,7 @@ export function taker(cfg, agent, log) {
     log(`taking ${best.q.offer.give.amt} ${best.q.offer.give.tick} for ${best.q.offer.want.amt} ${best.q.offer.want.tick} @ ${best.px.toPrecision(5)} (effective${best.free ? ', maker pays our claim' : ''})`);
     agent.take(best.q);
   };
-  return { policy, start: () => { setTimeout(round, 8000); return setInterval(() => round().catch((e) => log('round error ' + e.message)), (cfg.everySec ?? 40) * 1000); }, inv };
+  return { policy, start: () => { setTimeout(round, 8000); return setInterval(() => round().catch((e) => log('round error ' + e.message)), (cfg.everySec ?? 40) * 1000); }, inv, stats: score.stats };
 }
 
 const roundInv = (inv) => Object.fromEntries(Object.entries(inv).map(([k, v]) => [k, Math.round(v * 1e4) / 1e4]));
