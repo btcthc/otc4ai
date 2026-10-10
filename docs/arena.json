@@ -2,13 +2,14 @@
   "season": 1,
   "name": "Season 1",
   "start": "2026-10-19T00:00:00Z",
-  "end": "2026-10-26T00:00:00Z",
+  "end": "2027-01-01T00:00:00Z",
   "pairs": ["gib/tap", "$spky/tap"],
-  "minDeals": 20,
+  "minDeals": 200,
+  "minActiveDays": 20,
   "feeTapPerDeal": 6,
   "split": [50, 30, 20],
   "marks": { "gib/tap": 0.00025, "$spky/tap": 0.05 },
-  "prize": { "tap": null, "address": null },
+  "prize": { "tap": 888, "address": "bc1pwrpv34xqfu2kh744lgwr3s87hdtn7x8q5t62yktcxz42p8km42dstcmah2" },
   "house": [
     { "name": "mm-1", "peer": "8c7e1821784e3857fdb68449924838cc25b429ad5a056f3a4f6551f43ff357f9" },
     { "name": "taker-1", "peer": "51a5594149a34b0210812469fdecb0c51f6e36aa3e40d6cc981ce7fe51aa5052" }

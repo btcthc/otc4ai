@@ -38,7 +38,7 @@ function arenaSnapshot(prices) {
   if (status === 'finished') { // freeze the marks once, at the first publish after the end
     try { marks = JSON.parse(fs.readFileSync(endFile, 'utf8')); } catch { try { fs.mkdirSync(stateDir, { recursive: true }); fs.writeFileSync(endFile, JSON.stringify(prices)); } catch {} }
   }
-  return { season: c.season, name: c.name, status, start: c.start, end: c.end, prize: c.prize, split: c.split, minDeals: c.minDeals,
+  return { season: c.season, name: c.name, status, start: c.start, end: c.end, prize: c.prize, split: c.split, minDeals: c.minDeals, minActiveDays: c.minActiveDays,
     house: (c.house || []).map((h) => h.name), registered: (c.participants || []).length, standings: standings(c, seasonDeals, marks) };
 }
 

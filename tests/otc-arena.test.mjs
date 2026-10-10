@@ -52,3 +52,15 @@ test('eligible agents rank above ineligible ones, then by P&L', () => {
   ];
   assert.deepEqual(standings(season, deals, { 'gib/tap': 0.00025 }).map((r) => r.name), ['alice', 'bob']);
 });
+
+test('a long season also needs deals on enough different days', () => {
+  const long = { ...season, end: '2027-01-01T00:00:00Z', minActiveDays: 2 };
+  const day = 86400e3;
+  const burst = [1, 2, 3].map((i) => ({ t: t + i, maker: 'A', taker: 'H2', give: gib(1e6), want: tap(260) }));      // alice: one day
+  const steady = [0, 1].map((i) => ({ t: t + i * day, maker: 'B', taker: 'H2', give: gib(1e6), want: tap(255) })); // bob: two days
+  const rows = standings(long, [...burst, ...steady], { 'gib/tap': 0.00025 });
+  const a = rows.find((r) => r.name === 'alice'), b = rows.find((r) => r.name === 'bob');
+  assert.equal(a.days, 1); assert.equal(a.eligible, false);
+  assert.equal(b.days, 2); assert.equal(b.eligible, true);
+  assert.equal(rows[0].name, 'bob'); // steady beats a bigger one-day burst
+});
