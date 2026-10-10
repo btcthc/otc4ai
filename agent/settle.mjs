@@ -4,19 +4,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as tap from '../otc/tap.js';
+import { batcher } from './batch.mjs';
 
-export function paperSettle() {
+// Without batching every action is its own inscription.
+const SINGLE = { lockWindowMs: 0, claimMaxWaitMs: 0, maxActions: 1 };
+
+// batch: batcher options (see batch.mjs) or null; onInscribe({ ins, n }) reports each simulated
+// inscription so the bot can book what it would have paid on-chain.
+export function paperSettle({ batch = null, onInscribe = () => {} } = {}) {
+  let n = 0;
+  const b = batcher({ ...(batch || SINGLE), flush: async () => `paperins${(++n).toString(16)}`, onFlush: onInscribe });
   return {
+    batcher: b,
     isLockId: (id) => /^paper:[0-9a-f]{16}:(maker|taker)$/.test(String(id)),
-    lock: async (d, side) => `paper:${d.id}:${side}`,
+    lock: async (d, side) => { await b.add(tap.dealLegs(d)[side], 'lock'); return `paper:${d.id}:${side}`; },
     verify: async (d, side, id) => (id === `paper:${d.id}:${side}` ? { ok: true, problems: [] } : { ok: false, problems: ['wrong paper lock id'] }),
-    claim: async () => true,
+    claim: async (d, lockId, preimage) => { await b.add(tap.claimAction(lockId, preimage), 'claim'); return true; },
   };
 }
 
-// Human-in-the-loop: writes <did>-<step>.json (unsigned redeem) and waits for <did>-<step>.done
-// containing the lock id (for locks) or anything (for claims).
-export function draftSettle({ outbox, auth, indexer, log = () => {} }) {
+// Human-in-the-loop: writes batch-<n>.json (one unsigned redeem with every queued action) and waits
+// for batch-<n>.done containing the inscription id. Lock ids are "<inscriptionId>:<actionIndex>".
+export function draftSettle({ outbox, auth, indexer, batch = null, onInscribe = () => {}, log = () => {} }) {
   fs.mkdirSync(outbox, { recursive: true });
   const waitFor = async (file, ms = 6 * 3600e3) => {
     const t0 = Date.now();
@@ -26,24 +35,21 @@ export function draftSettle({ outbox, auth, indexer, log = () => {} }) {
     }
     throw new Error('timed out waiting for ' + path.basename(file));
   };
-  const write = (name, actions, help) => {
-    const file = path.join(outbox, name + '.json');
-    fs.writeFileSync(file, JSON.stringify({ help, redeem: tap.redeemDraft(auth, actions) }, null, 2));
-    log(`draft ready: ${file} — sign + inscribe it, then write the result into ${name}.done`);
-    return path.join(outbox, name + '.done');
+  let n = fs.readdirSync(outbox).filter((f) => /^batch-\d+\.json$/.test(f)).length;
+  const flush = async (actions) => {
+    const name = `batch-${++n}`, file = path.join(outbox, name + '.json');
+    fs.writeFileSync(file, JSON.stringify({ help: 'Sign with your authority key, inscribe, put the inscription id into ' + name + '.done', redeem: tap.redeemDraft(auth, actions) }, null, 2));
+    log(`draft ready: ${file} (${actions.length} action${actions.length > 1 ? 's' : ''}) — sign + inscribe it, then write the inscription id into ${name}.done`);
+    const ins = await waitFor(path.join(outbox, name + '.done'));
+    if (!/^[0-9a-f]{64}i\d+$/.test(ins)) throw new Error('bad inscription id in ' + name + '.done');
+    return ins;
   };
+  const b = batcher({ ...(batch || SINGLE), flush, onFlush: onInscribe });
   return {
+    batcher: b,
     isLockId: tap.isLockId,
-    async lock(d, side) {
-      const leg = tap.dealLegs(d)[side];
-      const id = await waitFor(write(`${d.id}-${side}-lock`, [leg], 'Sign with your authority key, inscribe, put "<inscriptionId>:0" into the .done file'));
-      if (!tap.isLockId(id)) throw new Error('bad lock id in .done file');
-      return id;
-    },
+    lock: async (d, side) => (await b.add(tap.dealLegs(d)[side], 'lock')).id,
     verify: (d, side, id) => tap.verifyLock(indexer, id, tap.dealLegs(d)[side]),
-    async claim(d, lockId, preimage) {
-      await waitFor(write(`${d.id}-claim`, [tap.claimAction(lockId, preimage)], 'Sign, inscribe, then create the .done file'));
-      return true;
-    },
+    claim: async (d, lockId, preimage) => { await b.add(tap.claimAction(lockId, preimage), 'claim'); return true; },
   };
 }

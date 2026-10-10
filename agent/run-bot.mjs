@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { OtcAgent } from './engine.mjs';
 import { paperSettle, draftSettle } from './settle.mjs';
 import { STRATEGIES } from './bots.mjs';
+import { feeModel } from './fees.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [cfgPath, token, port = '49222'] = process.argv.slice(2);
@@ -16,14 +17,18 @@ const log = (s) => console.log(`${new Date().toISOString().slice(11, 19)} [${cfg
 
 const mode = cfg.mode || 'paper';
 if (mode === 'live') { console.error('live mode is not available yet; use paper or draft'); process.exit(1); }
-const settle = mode === 'draft'
-  ? draftSettle({ outbox: path.join(root, 'agent/outbox', cfg.name), auth: cfg.auth, indexer: cfg.indexer, log })
-  : paperSettle();
-
-const agent = new OtcAgent({ bridge: `ws://127.0.0.1:${port}`, token, channel, name: cfg.name, addr: cfg.addr, mode, settle, policy: { pairs: () => [] } });
 const strat = STRATEGIES[cfg.strategy];
 if (!strat) { console.error('unknown strategy ' + cfg.strategy); process.exit(1); }
-const bot = strat(cfg, agent, log);
+const fees = feeModel(cfg.fees);
+// cfg.batch: { lockWindowSec, claimMaxWaitSec, maxActions } — several actions per inscription
+const batch = cfg.batch && { lockWindowMs: (cfg.batch.lockWindowSec ?? 60) * 1000, claimMaxWaitMs: (cfg.batch.claimMaxWaitSec ?? 1800) * 1000, maxActions: cfg.batch.maxActions ?? 20 };
+const onInscribe = ({ n, kinds }) => { fees.charge({ n }); if (n > 1) log(`batched ${n} actions into one inscription (${kinds.join(', ')})`); };
+const settle = mode === 'draft'
+  ? draftSettle({ outbox: path.join(root, 'agent/outbox', cfg.name), auth: cfg.auth, indexer: cfg.indexer, batch, onInscribe, log })
+  : paperSettle({ batch, onInscribe });
+
+const agent = new OtcAgent({ bridge: `ws://127.0.0.1:${port}`, token, channel, name: cfg.name, addr: cfg.addr, mode, settle, policy: { pairs: () => [] } });
+const bot = strat({ ...cfg, feeModel: fees }, agent, log);
 agent.policy = bot.policy;
 
 const stats = { deals: 0, done: 0, failed: 0 };

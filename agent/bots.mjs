@@ -11,13 +11,15 @@ export const fmt = (x) => {
 // Market maker: quotes around a mid price with a spread, keeps a bid and an ask on the board.
 export function marketMaker(cfg, agent, log) {
   const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
-  let feesUsd = 0;
   const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p }]));
   const posted = new Map();
   const has = (tick, amt) => (inv[tick] ?? 0) >= amt;
   const legs = (p, side, amt) => {
     // side is the requester's view: 'buy' = they buy base from me.
-    const px = side === 'buy' ? p.mid * (1 + p.spread / 2) : p.mid * (1 - p.spread / 2);
+    // passFees: my network fee is added to the price, so it is a bigger share of small trades
+    // and almost nothing on big ones.
+    const edge = p.spread / 2 + (cfg.passFees ? fees.quote().usd / Math.max(1e-9, usd(p, amt)) : 0);
+    const px = side === 'buy' ? p.mid * (1 + edge) : p.mid * (1 - edge);
     const quoteAmt = amt * px;
     return side === 'buy'
       ? { give: { tick: p.base, amt: fmt(amt) }, want: { tick: p.quote, amt: fmt(quoteAmt) }, gives: [p.base, amt] }
@@ -42,8 +44,9 @@ export function marketMaker(cfg, agent, log) {
       const [out, inn] = d.role === 'maker' ? [d.offer.give, d.offer.want] : [d.offer.want, d.offer.give];
       inv[out.tick] = (inv[out.tick] ?? 0) - Number(out.amt);
       inv[inn.tick] = (inv[inn.tick] ?? 0) + Number(inn.amt);
-      feesUsd += fees.quote().usd; // what this deal would have cost on-chain (paper P&L stays honest)
-      log(`inventory ${JSON.stringify(roundInv(inv))} · network fees so far $${feesUsd.toFixed(2)}`);
+      // fees are booked per inscription (fees.charge), so batching shows up in the paper P&L
+      const st = fees.st, avg = st.inscriptions ? st.actions / st.inscriptions : 1;
+      log(`inventory ${JSON.stringify(roundInv(inv))} · network fees so far $${st.spentUsd.toFixed(2)} (${st.inscriptions} inscriptions, ${avg.toFixed(1)} actions each)`);
     },
   };
   // Keep one bid and one ask per pair on the public board; drift the mid a little.
@@ -62,7 +65,7 @@ export function marketMaker(cfg, agent, log) {
       }
     }
   };
-  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv, fees, feesUsd: () => feesUsd };
+  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv, fees, feesUsd: () => fees.st.spentUsd };
 }
 
 // Taker: every N seconds asks for quotes on a random size and takes the best one if it is within its limit.

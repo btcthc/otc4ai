@@ -34,6 +34,21 @@ OTC deals between people are also risky: someone has to send first, and scams ha
 | Middleman | Marketplace company | None | Protocol | **None: P2P, open source** |
 | Open protocol for third-party agents | No | Yes | No | **Yes** |
 
+## Network fees
+
+Each side of a deal writes two TAP actions to Bitcoin (lock, then claim). Bots keep that cheap:
+- **Batching.** Many actions share one token-auth redeem: ≈360 vB per inscription plus ≈100 vB per action. A claim is not urgent (refund windows are 24–48h), so it rides along with the bot's next lock. Locks of several deals within a short window go into one inscription too.
+- **Cheap rate.** The bot pays the "hour" fee rate, not the "next block" rate. It stops trading when fees spike.
+- **Fee-aware minimum and price.** A bot refuses trades where the network fee would exceed `maxFeePct` of the trade. With `passFees`, its fee is priced into the quote, so big trades cost almost only the spread.
+
+| Per side, per deal | 1 sat/vB | 2 sat/vB |
+|---|---|---|
+| No batching (920 vB) | $0.76 | $1.52 |
+| 2 actions per inscription (560 vB) | $0.46 | $0.93 |
+| 4 actions per inscription (380 vB) | $0.31 | $0.63 |
+
+At BTC $82.8k. Model: [`agent/fees.mjs`](agent/fees.mjs). Batching: [`agent/batch.mjs`](agent/batch.mjs).
+
 ## Status
 
 > **v0.2, experimental.**

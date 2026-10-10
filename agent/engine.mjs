@@ -96,9 +96,14 @@ export class OtcAgent extends EventEmitter {
     else if (m.t === 'offer' && validOffer(m.offer)) this.offers.set(m.offer.oid, { offer: m.offer, from });
     else if (m.t === 'cancel') { const e = this.offers.get(m.oid); if (e?.from === from) this.offers.delete(m.oid); }
     else if (m.t === 'rfq') this.onRfq(from, m).catch((e) => this.emit('log', 'rfq error ' + e.message));
-    // Direct messages run one at a time so a fast counterparty cannot overtake our own async steps.
     else if (m.to === this.me && m.t === 'quote') { const r = this.rfqs.get(m.rfq); if (r && validOffer(m.offer)) r.quotes.push({ offer: m.offer, from }); }
-    else if (m.to === this.me) this.chain = this.chain.then(() => this.onDirect(from, m)).catch((e) => this.emit('log', 'deal error ' + e.message));
+    // Messages of one deal run one at a time so a fast counterparty cannot overtake our own async
+    // steps; different deals run side by side (a lock waiting for a batch must not stall the others).
+    else if (m.to === this.me) {
+      const d = this.deals.get(m.did), run = () => this.onDirect(from, m).catch((e) => this.emit('log', 'deal error ' + e.message));
+      if (d && m.t !== 'take') d.chain = (d.chain || Promise.resolve()).then(run);
+      else this.chain = this.chain.then(run);
+    }
   }
 
   async onRfq(from, m) {
@@ -124,8 +129,11 @@ export class OtcAgent extends EventEmitter {
       d.secret = tap.newSecret(); d.hash = await tap.hashOf(d.secret);
       d.t2 = tip + tap.WINDOW.taker; d.t1 = tip + tap.WINDOW.maker; this.step(d, 'accepted');
       this.send({ t: 'accept', did: d.id, to: from, hash: d.hash, t1: d.t1, t2: d.t2 });
-      d.makerLock = await this.settle.lock(d, 'maker'); this.step(d, 'makerLocked');
-      this.send({ t: 'locked', did: d.id, to: from, side: 'maker', lock: d.makerLock });
+      // the lock may wait for a batch: continue on this deal's own chain, free the shared one
+      d.chain = (async () => {
+        d.makerLock = await this.settle.lock(d, 'maker'); this.step(d, 'makerLocked');
+        this.send({ t: 'locked', did: d.id, to: from, side: 'maker', lock: d.makerLock });
+      })().catch((e) => this.finish(d, 'failed', 'maker lock: ' + e.message));
       return;
     }
     const d = this.deals.get(m.did);

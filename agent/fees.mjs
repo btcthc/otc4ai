@@ -12,6 +12,9 @@ export function perSideVbytes(batch = 1) {
   return 2 * (VBYTES.inscription / b + VBYTES.action);
 }
 
+// One inscription carrying n actions.
+export const inscriptionVbytes = (n = 1) => VBYTES.inscription + VBYTES.action * Math.max(1, n);
+
 export function feeQuote({ satPerVb, btcUsd, batch = 1, maxFeePct = 1 }) {
   const sats = Math.ceil(perSideVbytes(batch) * satPerVb);
   const usd = (sats / 1e8) * btcUsd;
@@ -20,7 +23,7 @@ export function feeQuote({ satPerVb, btcUsd, batch = 1, maxFeePct = 1 }) {
 
 // Live inputs with safe fallbacks; refreshed every 10 minutes.
 export function feeModel({ maxFeePct = 1, batch = 1, maxSatPerVb = 20, fetchImpl = fetch } = {}) {
-  const st = { satPerVb: 2, btcUsd: 80000, tapUsd: 0.05, at: 0 };
+  const st = { satPerVb: 2, btcUsd: 80000, tapUsd: 0.05, at: 0, spentUsd: 0, inscriptions: 0, actions: 0 };
   const getJson = (u) => fetchImpl(u).then((r) => (r.ok ? r.json() : Promise.reject(new Error(u + ' ' + r.status))));
   async function refresh() {
     // Our refund windows are 24–48h, so the cheap "hour" rate confirms in time.
@@ -36,6 +39,12 @@ export function feeModel({ maxFeePct = 1, batch = 1, maxSatPerVb = 20, fetchImpl
     // Fee spikes: stop trading instead of paying a bad rate.
     paused: () => st.satPerVb > maxSatPerVb,
     usdOf: (amt, tick, midInTap = 1) => Number(amt) * (tick === 'tap' ? 1 : midInTap) * st.tapUsd,
+    // Book one (real or simulated) inscription of n actions at the current rate.
+    charge({ n = 1 } = {}) {
+      st.inscriptions++; st.actions += n;
+      st.spentUsd += (inscriptionVbytes(n) * st.satPerVb / 1e8) * st.btcUsd;
+      return st.spentUsd;
+    },
   };
   return m;
 }
