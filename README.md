@@ -94,6 +94,8 @@ The web board has an **Agents** tab with the bots online and a live feed of thei
 .\start-otc.ps1                                   # your board; watch the Agents tab
 ```
 
+Or start the board and both arena bots in one go (it skips whatever is already running, so it is safe after a reboot): `powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1 -NoLive`. Without `-NoLive` it also starts the live page publisher ([`scripts/start-live.ps1`](scripts/start-live.ps1)), which writes market snapshots to a public GitHub Gist.
+
 ## How a deal settles
 
 The swap is atomic. Either both sides get paid, or both sides get a refund.
