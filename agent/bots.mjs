@@ -1,3 +1,5 @@
+import { feeModel } from './fees.mjs';
+
 // Example strategies. A policy tells the engine what to quote and whether to accept a deal;
 // the bot loop decides what to post or take. Inventory is tracked locally (paper mode = simulated).
 
@@ -8,7 +10,8 @@ export const fmt = (x) => {
 
 // Market maker: quotes around a mid price with a spread, keeps a bid and an ask on the board.
 export function marketMaker(cfg, agent, log) {
-  const inv = { ...cfg.inventory };
+  const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
+  let feesUsd = 0;
   const P = new Map(cfg.pairs.map((p) => [`${p.base}/${p.quote}`, { ...p }]));
   const posted = new Map();
   const has = (tick, amt) => (inv[tick] ?? 0) >= amt;
@@ -20,11 +23,16 @@ export function marketMaker(cfg, agent, log) {
       ? { give: { tick: p.base, amt: fmt(amt) }, want: { tick: p.quote, amt: fmt(quoteAmt) }, gives: [p.base, amt] }
       : { give: { tick: p.quote, amt: fmt(quoteAmt) }, want: { tick: p.base, amt: fmt(amt) }, gives: [p.quote, quoteAmt] };
   };
+  // Trade size in USD (pairs are quoted in TAP).
+  const usd = (p, baseAmt) => fees.usdOf(baseAmt * p.mid, p.quote);
+  const bigEnough = (p, baseAmt) => usd(p, baseAmt) >= fees.quote().minNotionalUsd;
   const policy = {
     pairs: () => [...P.keys()],
+    info: () => { const q = fees.quote(); return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb }; },
     quote({ side, tick, against, amt }) {
       const p = P.get(`${tick}/${against}`);
-      if (!p || amt > p.maxBase || !['buy', 'sell'].includes(side)) return null;
+      if (!p || !['buy', 'sell'].includes(side)) return null;
+      if (amt > p.maxBase || fees.paused() || !bigEnough(p, amt)) { log(`no quote for ${amt} ${tick}: ${amt > p.maxBase ? 'above max size' : fees.paused() ? 'network fee too high' : 'below the fee-efficient minimum'}`); return null; }
       const l = legs(p, side, amt);
       if (!l.give.amt || !l.want.amt || !has(...l.gives)) return null;
       return { give: l.give, want: l.want };
@@ -34,12 +42,17 @@ export function marketMaker(cfg, agent, log) {
       const [out, inn] = d.role === 'maker' ? [d.offer.give, d.offer.want] : [d.offer.want, d.offer.give];
       inv[out.tick] = (inv[out.tick] ?? 0) - Number(out.amt);
       inv[inn.tick] = (inv[inn.tick] ?? 0) + Number(inn.amt);
-      log(`inventory ${JSON.stringify(roundInv(inv))}`);
+      feesUsd += fees.quote().usd; // what this deal would have cost on-chain (paper P&L stays honest)
+      log(`inventory ${JSON.stringify(roundInv(inv))} · network fees so far $${feesUsd.toFixed(2)}`);
     },
   };
   // Keep one bid and one ask per pair on the public board; drift the mid a little.
-  const refresh = () => {
+  const refresh = async () => {
+    await fees.ready();
     for (const p of P.values()) {
+      // never post an offer smaller than the fee-efficient minimum
+      const minBase = fees.quote().minNotionalUsd / Math.max(1e-12, fees.usdOf(p.mid, p.quote));
+      if (p.size < minBase) p.size = Math.ceil(minBase * 1.1);
       p.mid *= 1 + (Math.random() - 0.5) * (cfg.drift ?? 0.004);
       for (const side of ['buy', 'sell']) {
         const old = posted.get(p.base + side);
@@ -49,14 +62,15 @@ export function marketMaker(cfg, agent, log) {
       }
     }
   };
-  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv };
+  return { policy, start: () => { refresh(); return setInterval(refresh, (cfg.refreshSec ?? 90) * 1000); }, inv, fees, feesUsd: () => feesUsd };
 }
 
 // Taker: every N seconds asks for quotes on a random size and takes the best one if it is within its limit.
 export function taker(cfg, agent, log) {
-  const inv = { ...cfg.inventory };
+  const inv = { ...cfg.inventory }, fees = cfg.feeModel || feeModel(cfg.fees);
   const policy = {
     pairs: () => cfg.pairs.map((p) => `${p.base}/${p.quote}`),
+    info: () => { const q = fees.quote(); return { minUsd: Math.ceil(q.minNotionalUsd), feeUsd: +q.usd.toFixed(2), satPerVb: fees.st.satPerVb }; },
     approve: () => false, // posts no offers of its own
     settled(d) {
       inv[d.offer.want.tick] = (inv[d.offer.want.tick] ?? 0) - Number(d.offer.want.amt);
@@ -67,7 +81,12 @@ export function taker(cfg, agent, log) {
   const round = async () => {
     const p = cfg.pairs[Math.floor(Math.random() * cfg.pairs.length)];
     const side = Math.random() < 0.5 ? 'buy' : 'sell';
-    const amt = Math.round(p.minBase + Math.random() * (p.maxBase - p.minBase));
+    await fees.ready();
+    if (fees.paused()) return log(`network fee ${fees.st.satPerVb} sat/vB is above the limit; waiting`);
+    // size at least the fee-efficient minimum (priced with this bot's own price limit)
+    const minBase = 1.2 * fees.quote().minNotionalUsd / Math.max(1e-12, fees.usdOf(p.maxPrice, p.quote));
+    const lo = Math.max(p.minBase, minBase), hi = Math.max(p.maxBase, lo);
+    const amt = Math.round(lo + Math.random() * (hi - lo));
     const quotes = await agent.requestQuotes({ side, tick: p.base, against: p.quote, amt });
     const priced = quotes.map((q) => ({ q, px: side === 'buy' ? Number(q.offer.want.amt) / Number(q.offer.give.amt) : Number(q.offer.give.amt) / Number(q.offer.want.amt) }));
     const ok = priced.filter(({ px }) => (side === 'buy' ? px <= p.maxPrice : px >= p.minPrice));

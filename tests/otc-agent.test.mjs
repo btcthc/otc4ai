@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { OtcAgent } from '../agent/engine.mjs';
 import { paperSettle } from '../agent/settle.mjs';
 import { marketMaker, taker } from '../agent/bots.mjs';
+import { feeModel } from '../agent/fees.mjs';
+
+// Offline fee model: 1 sat/vB, BTC $80k, TAP $0.05, no minimum unless a test raises it.
+const offlineFees = (maxFeePct = 100) => { const m = feeModel({ maxFeePct, fetchImpl: () => Promise.reject(new Error('offline')) }); m.st.at = Date.now(); m.st.satPerVb = 1; return m; };
 
 const ADDR_M = 'bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297';
 const ADDR_T = 'bc1pxwww0ct9ue7e8tdnlmug5m2tamfn7q06sahstg39ys4c9f3340qqxrdu9k';
@@ -20,8 +24,8 @@ test('bot-to-bot RFQ deal settles end to end in paper mode', async () => {
   const M = mk('mm', 'aa'.repeat(32), ADDR_M), T = mk('tk', 'bb'.repeat(32), ADDR_T);
   M.me = 'aa'.repeat(32); T.me = 'bb'.repeat(32);
   const log = () => {};
-  const mm = marketMaker({ name: 'mm', pairs: [{ base: 'gib', quote: 'tap', mid: 0.00025, spread: 0.02, size: 1e6, maxBase: 5e6 }], inventory: { gib: 1e7, tap: 1000 } }, M, log);
-  const tk = taker({ pairs: [] , inventory: { gib: 0, tap: 1000 } }, T, log);
+  const mm = marketMaker({ name: 'mm', pairs: [{ base: 'gib', quote: 'tap', mid: 0.00025, spread: 0.02, size: 1e6, maxBase: 5e6 }], inventory: { gib: 1e7, tap: 1000 }, feeModel: offlineFees() }, M, log);
+  const tk = taker({ pairs: [], inventory: { gib: 0, tap: 1000 }, feeModel: offlineFees() }, T, log);
   M.policy = mm.policy; T.policy = tk.policy;
   bus([M, T]);
 
@@ -66,4 +70,17 @@ test('a forged secret does not complete the deal', async () => {
   T.onMsg(d.peer, { app: 'otc4ai', v: 1, t: 'claimed', to: T.me, did: d.id, preimage: 'b'.repeat(64) });
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(d.state, 'takerLocked');
+});
+
+test('market maker refuses trades too small to pay the network fee', async () => {
+  const M = mk('mm', '', ADDR_M); M.me = '11'.repeat(32);
+  const fees = offlineFees(1); // fees must stay under 1% of the trade
+  const mm = marketMaker({ name: 'mm', pairs: [{ base: 'gib', quote: 'tap', mid: 0.00025, spread: 0.02, size: 1e6, maxBase: 1e9 }], inventory: { gib: 1e9, tap: 1e6 }, feeModel: fees }, M, () => {});
+  const min = fees.quote().minNotionalUsd;            // ≈ $59 at 1 sat/vB, BTC $80k
+  const baseFor = (usd) => usd / (0.00025 * 0.05);    // GIB amount worth `usd`
+  assert.ok(min > 40 && min < 80, 'min ' + min);
+  assert.equal(mm.policy.quote({ side: 'buy', tick: 'gib', against: 'tap', amt: baseFor(min * 0.5) }), null);
+  assert.ok(mm.policy.quote({ side: 'buy', tick: 'gib', against: 'tap', amt: baseFor(min * 2) }));
+  fees.st.satPerVb = 50;                               // fee spike: stop quoting
+  assert.equal(mm.policy.quote({ side: 'buy', tick: 'gib', against: 'tap', amt: baseFor(min * 50) }), null);
 });

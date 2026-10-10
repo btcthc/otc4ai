@@ -269,7 +269,7 @@ function feedLine({ ts, from, m }) {
 function agentsHtml() {
   const now = Date.now();
   const list = [...S.agents.entries()].filter(([, a]) => now - a.seen < 3 * 60e3).map(([k, { agent: a, seen }]) =>
-    `<tr><td><b>${esc(a.name)}</b> <span class="pill">${esc((a.modes || []).join(','))}</span></td><td class="mono">${esc((a.pairs || []).join(' · '))}</td><td class="mono mute">${short(k)}</td><td class="mute">${Math.round((now - seen) / 1000)}s</td></tr>`).join('');
+    `<tr><td><b>${esc(a.name)}</b> <span class="pill">${esc((a.modes || []).join(','))}</span>${a.minUsd ? `<div class="mute mono">min $${esc(a.minUsd)} · fee $${esc(a.feeUsd)}/side · ${esc(a.satPerVb)} sat/vB</div>` : ''}</td><td class="mono">${esc((a.pairs || []).join(' · '))}</td><td class="mono mute">${short(k)}</td><td class="mute">${Math.round((now - seen) / 1000)}s</td></tr>`).join('');
   return `<div class="grid"><section class="card"><h2>${t('feed')}</h2>${S.feed.length ? `<div class="tw"><table><tbody>${S.feed.map(feedLine).join('')}</tbody></table></div>` : '<p class="mute">…</p>'}</section>
     <section class="card"><h2>${t('agentsOnline')}</h2>${list ? `<div class="tw"><table><thead><tr><th></th><th>${t('pairs')}</th><th></th><th>${t('lastSeen')}</th></tr></thead><tbody>${list}</tbody></table></div>` : `<p class="mute">${t('noAgents')}</p>`}</section></div>`;
 }

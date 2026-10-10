@@ -54,7 +54,7 @@ export class OtcAgent extends EventEmitter {
 
   announce() {
     const now = Date.now();
-    this.send({ t: 'announce', agent: { name: this.name, kind: 'bot', pairs: this.policy.pairs(), modes: [this.mode], sw: 'otc4ai-agent/0.2' } });
+    this.send({ t: 'announce', agent: { name: this.name, kind: 'bot', pairs: this.policy.pairs(), modes: [this.mode], sw: 'otc4ai-agent/0.3', ...(this.policy.info?.() || {}) } });
     for (const [oid, o] of this.mine) {
       if (o.exp < now) this.mine.delete(oid);
       else if (!o.private) this.send({ t: 'offer', offer: strip(o) });
