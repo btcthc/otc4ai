@@ -1,0 +1,57 @@
+# Live mode (v0.3, in testing)
+
+In live mode a bot trades real TAP tokens. It holds its own wallet, signs its own token-auth redeems and inscribes them itself, inside spending limits you set. Paper mode stays the default.
+
+> Status: unit-tested, not yet run end to end on a real chain. The next step is a full run on regtest (bitcoind + ord-tap), then a small mainnet pilot. Do not put more on a bot wallet than you are ready to lose while this is experimental.
+
+## How it works
+
+- **One key per bot** (`agent/wallet-cli.mjs`). Its taproot address holds the bot's tokens and pays its Bitcoin fees. The same key is the bot's TAP authority. The key file stays in `agent/state/` (gitignored), and no command ever prints it.
+- **Authority, once.** `setup-authority` inscribes a `token-auth` creation signed by the key, then taps it (sends it back to the bot address), as the TAP spec requires.
+- **Every batch is one redeem.** The batcher collects locks and claims. The bot signs `sha256(JSON.stringify(redeem) + salt)` (`agent/tapsign.mjs`) and inscribes it as commit + reveal (`agent/inscribe.mjs`). The signature format mirrors ord-tap's check: recovery from `hash`, low-S, and `r`/`s` as decimal strings.
+- **Counterparty locks** show up on the indexer only after they confirm. `verify` waits up to 3 hours for the lock, then checks ticker, amount, claim address, hashlock and refund height.
+- **Refunds.** The bot keeps its open locks on disk. Every 5 minutes it refunds any lock whose counterparty disappeared once `refund_after` is reached.
+- **Limits** (`agent/limits.mjs`), checked before a lock is signed:
+  - `perDealTap`: the largest deal, valued in TAP;
+  - `perDayTap`: the rolling 24 h total;
+  - `maxOpenTap`: TAP locked in deals that are not settled yet;
+  - `ticks` (optional): the allowed tickers.
+
+  Deals that cannot be valued in TAP are refused.
+- **Kill switch.** `node agent/wallet-cli.mjs stop` blocks every new lock in every live bot, while claims and refunds of open deals still go through. Undo it with `resume`.
+- **Coin safety.** Outputs of 10,000 sats or less are never spent as fees, because inscriptions and TAP transferables sit on small outputs. Fund the bot with one larger output.
+
+## Setup
+
+```powershell
+node agent/wallet-cli.mjs new mybot --network regtest      # or signet / testnet / mainnet
+node agent/wallet-cli.mjs address mybot                     # send a little BTC here (and the tokens it trades)
+node agent/wallet-cli.mjs setup-authority mybot --ticks tap,gib
+node agent/wallet-cli.mjs status mybot --indexer <ord-tap url> --ticks tap,gib
+```
+
+Bot config (start from `agent/configs/mm-1.json`):
+
+```json
+{
+  "mode": "live",
+  "wallet": "mybot",
+  "indexer": "http://127.0.0.1:8080",
+  "limits": { "perDealTap": 200, "perDayTap": 1000, "maxOpenTap": 400, "ticks": ["tap", "gib"] }
+}
+```
+
+On mainnet the config also needs `"allowMainnet": true`, and `setup-authority` needs `--mainnet`.
+
+Chain access:
+- regtest: Bitcoin Core RPC, set by `OTC4AI_BITCOIND=http://user:pass@127.0.0.1:18443`;
+- other networks: mempool.space by default, or another Esplora API set by `OTC4AI_ESPLORA`.
+
+## Tests
+
+`npm test` covers:
+- signatures: recovery, tampering and high-S rejection, against the same rules ord-tap applies;
+- inscriptions: commit/reveal are built and the TAP JSON is parsed back from the witness; small outputs are never spent;
+- the tap transaction;
+- limits;
+- live settlement against a fake chain and a fake indexer: a lock over the limit is refused, signed locks are inscribed, the bot waits for a counterparty lock, and an expired lock is refunded.

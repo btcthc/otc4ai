@@ -8,12 +8,16 @@
     "type": "terminal"
   },
   "dependencies": {
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
+    "@scure/btc-signer": "1.8.1",
     "b4a": "^1.6.7",
     "bare-ws": "2.0.3",
     "compact-encoding": "^2.18.0",
     "crypto": "npm:bare-node-crypto",
     "fs": "npm:bare-node-fs",
     "hyperschema": "1.17.1",
+    "micro-ordinals": "0.2.2",
     "path": "npm:bare-node-path",
     "pear-runtime": "1.3.1",
     "protomux": "^3.10.1",

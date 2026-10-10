@@ -4,9 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OtcAgent } from './engine.mjs';
-import { paperSettle, draftSettle } from './settle.mjs';
+import { hex } from '@scure/base';
+import { paperSettle, draftSettle, liveSettle } from './settle.mjs';
 import { STRATEGIES } from './bots.mjs';
 import { feeModel } from './fees.mjs';
+import { wallet } from './inscribe.mjs';
+import { limiter } from './limits.mjs';
+import { chainFor } from './chains.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [cfgPath, token, port = '49232'] = process.argv.slice(2);
@@ -16,14 +20,31 @@ const channel = JSON.parse(fs.readFileSync(path.join(root, 'otc/channel.json'), 
 const log = (s) => console.log(`${new Date().toISOString().slice(11, 19)} [${cfg.name}] ${s}`);
 
 const mode = cfg.mode || 'paper';
-if (mode === 'live') { console.error('live mode is not available yet; use paper or draft'); process.exit(1); }
 const strat = STRATEGIES[cfg.strategy];
 if (!strat) { console.error('unknown strategy ' + cfg.strategy); process.exit(1); }
 const fees = feeModel(cfg.fees);
 // cfg.batch: { lockWindowSec, claimMaxWaitSec, maxActions } — several actions per inscription
 const batch = cfg.batch && { lockWindowMs: (cfg.batch.lockWindowSec ?? 60) * 1000, claimMaxWaitMs: (cfg.batch.claimMaxWaitSec ?? 1800) * 1000, maxActions: cfg.batch.maxActions ?? 20 };
 const onInscribe = ({ n, kinds }) => { fees.charge({ n }); if (n > 1) log(`batched ${n} actions into one inscription (${kinds.join(', ')})`); };
-const settle = mode === 'draft'
+const stateDir = path.join(root, 'agent/state');
+let settle;
+if (mode === 'live') {
+  // cfg.wallet: name of a bot wallet made with agent/wallet-cli.mjs; cfg.limits: { perDealTap, perDayTap, maxOpenTap, ticks }
+  const die = (s) => { console.error(s); process.exit(1); };
+  let wf; try { wf = JSON.parse(fs.readFileSync(path.join(stateDir, `${cfg.wallet}.wallet.json`), 'utf8')); } catch { die(`live mode: bot wallet "${cfg.wallet}" not found (node agent/wallet-cli.mjs new <name> --network signet)`); }
+  if (wf.network === 'mainnet' && cfg.allowMainnet !== true) die('live mode on mainnet needs "allowMainnet": true in the config');
+  if (!cfg.limits || !(cfg.limits.perDealTap > 0) || !(cfg.limits.perDayTap > 0) || !(cfg.limits.maxOpenTap > 0)) die('live mode needs "limits": { "perDealTap", "perDayTap", "maxOpenTap" }');
+  if (!cfg.indexer) die('live mode needs "indexer" (an ord-tap server for the wallet network)');
+  const priv = hex.decode(wf.priv), w = wallet(priv, wf.network);
+  cfg.addr = w.address; // tokens are claimed to and refunded to the bot wallet
+  settle = liveSettle({
+    w, priv, chain: chainFor(wf.network), indexer: cfg.indexer, auth: wf.auth, batch, onInscribe, log,
+    limits: limiter(cfg.limits, { statePath: path.join(stateDir, `${cfg.name}-limits.json`), stopFile: path.join(stateDir, 'STOP') }),
+    statePath: path.join(stateDir, `${cfg.name}-locks.json`),
+  });
+  setInterval(() => settle.watchRefunds().catch((e) => log('refund watch: ' + e.message)), 5 * 60e3);
+  log(`live on ${wf.network}: wallet ${w.address}, authority ${wf.auth}, limits ${JSON.stringify(cfg.limits)}`);
+} else settle = mode === 'draft'
   ? draftSettle({ outbox: path.join(root, 'agent/outbox', cfg.name), auth: cfg.auth, indexer: cfg.indexer, batch, onInscribe, log })
   : paperSettle({ batch, onInscribe });
 

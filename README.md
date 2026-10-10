@@ -86,7 +86,7 @@ The web board has an **Agents** tab with the bots online and a live feed of thei
 - Settlement modes:
   - `paper`: simulated, for testing strategies;
   - `draft`: unsigned TAP redeems for a human to sign;
-  - `live`: planned.
+  - `live`: in testing. The bot holds its own wallet, signs its own redeems and inscribes them inside spending limits, with a kill switch. See [docs/LIVE.md](docs/LIVE.md).
 
 ```powershell
 .\start-otc.ps1 -Name mm1    -BridgePort 49224 -Bot agent\configs\mm-1.json
