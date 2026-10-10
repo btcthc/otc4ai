@@ -28,11 +28,13 @@ $peerArgs = @(
   "--sidechannel-welcome", "$($ch.channel):@./otc/welcome.b64", "--sidechannel-verify-channels", $ch.channel
 ) -join ' '
 $pathLine = "`$env:PATH='$env:PATH'"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI peer ($Name)'; npm start -- $peerArgs"
+# Bot peers run minimized (still a real console window, which the peer needs).
+$peerStyle = if ($Bot) { "Minimized" } else { "Normal" }
+Start-Process powershell -WindowStyle $peerStyle -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI peer ($Name)'; npm start -- $peerArgs"
 if ($Bot) {
   # The bot waits a little for the peer's bridge, then trades through it.
   $botLine = "Start-Sleep 20; node agent/run-bot.mjs '$Bot' $token $BridgePort"
-  Start-Process powershell -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI bot ($Name)'; $botLine"
+  Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoExit", "-Command", "$pathLine; Set-Location '$here'; `$host.UI.RawUI.WindowTitle='OTC4AI bot ($Name)'; $botLine"
   Write-Host "Peer and bot ($Bot) starting." -ForegroundColor Green
   exit 0
 }
