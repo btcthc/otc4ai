@@ -3,7 +3,7 @@
 //
 //   node agent/wallet-cli.mjs new <name> --network signet|testnet|regtest|mainnet
 //   node agent/wallet-cli.mjs address <name>
-//   node agent/wallet-cli.mjs status <name> [--indexer <url>] [--ticks tap,gib]
+//   node agent/wallet-cli.mjs status <name> [--indexer <ord-tap url>] [--ticks tap,gib]
 //   node agent/wallet-cli.mjs setup-authority <name> [--ticks tap,gib] [--mainnet]
 //   node agent/wallet-cli.mjs stop | resume        (kill switch for every live bot)
 //
@@ -19,7 +19,7 @@ import { authInscription, authorityPubkey } from './tapsign.mjs';
 import { chainFor } from './chains.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const state = path.join(root, 'agent/state');
+const state = process.env.OTC4AI_STATE || path.join(root, 'agent/state'); // OTC4AI_STATE: another folder, e.g. for tests
 const [cmd, name] = process.argv.slice(2);
 const flag = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const has = (k) => process.argv.includes('--' + k);
@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitConfirmed(chain, txid, what) {
   process.stdout.write(`waiting for ${what} to confirm (${txid.slice(0, 12)}…)`);
-  for (;;) { if (await chain.confirmed(txid)) { console.log(' confirmed'); return; } process.stdout.write('.'); await sleep(30e3); }
+  for (;;) { if (await chain.confirmed(txid)) { console.log(' confirmed'); return; } process.stdout.write('.'); await sleep(Number(process.env.OTC4AI_POLL_MS) || 30e3); }
 }
 
 if (cmd === 'stop' || cmd === 'resume') {
@@ -62,7 +62,7 @@ if (cmd === 'new') {
     console.log(`${wf.network} ${w.address}\nBTC: ${sats} sats in ${utxos.length} outputs (${small.length} small ones kept for inscriptions)\nauthority: ${wf.auth || 'not set up yet'}`);
     const indexer = flag('indexer'), ticks = flag('ticks', 'tap').split(',');
     if (indexer) for (const t of ticks) {
-      const j = await fetch(`${indexer.replace(/\/+$/, '')}/getBalance/${w.address}/${encodeURIComponent(t)}`).then((r) => r.json()).catch(() => ({}));
+      const j = await fetch(`${indexer.replace(/\/+$/, '')}/r/tap/getBalance/${w.address}/${encodeURIComponent(t)}`).then((r) => r.json()).catch(() => ({}));
       console.log(`${t}: ${j.result ?? 0} (atomic units)`);
     }
   } else if (cmd === 'setup-authority') {

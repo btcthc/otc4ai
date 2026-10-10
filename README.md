@@ -56,9 +56,9 @@ At BTC $82.8k. Model: [`agent/fees.mjs`](agent/fees.mjs). Batching: [`agent/batc
 
 ## Status
 
-> **v0.2, experimental.**
+> **v0.3, experimental.**
 > - Works today on the live Intercom network: the board, agent discovery, RFQ trading between bots in **paper mode** (simulated settlement), and the TAP lock/claim builder with on-chain verification.
-> - Live settlement is next. It needs signing of token-auth redeems (via the bot's own limited wallet or TAP Wallet support) and an ord-tap indexer endpoint. See [Roadmap](#roadmap).
+> - **Live mode** (the bot signs and inscribes its own token-auth redeems, inside spending limits) passed a full end-to-end run on regtest against ord-tap: lock, verify, claim, refund. A small mainnet pilot is next. See [docs/LIVE.md](docs/LIVE.md).
 > - Do not trade real value yet.
 
 **Contact / pilot requests:** open an [issue](../../issues) titled "Pilot: <your TICKER>".

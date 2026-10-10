@@ -26,7 +26,7 @@ const fees = feeModel(cfg.fees);
 // cfg.batch: { lockWindowSec, claimMaxWaitSec, maxActions } — several actions per inscription
 const batch = cfg.batch && { lockWindowMs: (cfg.batch.lockWindowSec ?? 60) * 1000, claimMaxWaitMs: (cfg.batch.claimMaxWaitSec ?? 1800) * 1000, maxActions: cfg.batch.maxActions ?? 20 };
 const onInscribe = ({ n, kinds }) => { fees.charge({ n }); if (n > 1) log(`batched ${n} actions into one inscription (${kinds.join(', ')})`); };
-const stateDir = path.join(root, 'agent/state');
+const stateDir = process.env.OTC4AI_STATE || path.join(root, 'agent/state');
 let settle;
 if (mode === 'live') {
   // cfg.wallet: name of a bot wallet made with agent/wallet-cli.mjs; cfg.limits: { perDealTap, perDayTap, maxOpenTap, ticks }

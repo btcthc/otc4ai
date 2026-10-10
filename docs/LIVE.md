@@ -2,7 +2,7 @@
 
 In live mode a bot trades real TAP tokens. It holds its own wallet, signs its own token-auth redeems and inscribes them itself, inside spending limits you set. Paper mode stays the default.
 
-> Status: unit-tested, not yet run end to end on a real chain. The next step is a full run on regtest (bitcoind + ord-tap), then a small mainnet pilot. Do not put more on a bot wallet than you are ready to lose while this is experimental.
+> Status: passed a full end-to-end run on a local regtest chain (Bitcoin Core 31.1 + ord-tap 1.0.5), see [below](#end-to-end-check-on-regtest). The next step is a small mainnet pilot. Do not put more on a bot wallet than you are ready to lose while this is experimental.
 
 ## How it works
 
@@ -46,6 +46,30 @@ On mainnet the config also needs `"allowMainnet": true`, and `setup-authority` n
 Chain access:
 - regtest: Bitcoin Core RPC, set by `OTC4AI_BITCOIND=http://user:pass@127.0.0.1:18443`;
 - other networks: mempool.space by default, or another Esplora API set by `OTC4AI_ESPLORA`.
+
+## End-to-end check on regtest
+
+[`scripts/regtest-e2e.mjs`](../scripts/regtest-e2e.mjs) runs the live code against Bitcoin Core in regtest and a real ord-tap indexer, so ord-tap itself judges every inscription:
+
+1. creates two fresh bot wallets with `wallet-cli new`, in a temporary folder (never `agent/state`), and funds them from the regtest miner;
+2. deploys and mints the test tokens `tap` and `gib` to them;
+3. sets up both token-auth authorities with `wallet-cli setup-authority` (inscribe, then tap);
+4. runs a full deal: maker lock → taker verifies and locks → maker verifies and claims → the taker finds the secret in the claim on Bitcoin and claims;
+5. abandons a second deal: after the refund height the refund watcher returns the maker's tokens;
+6. checks that a lock above the per-deal limit is refused before anything is signed.
+
+Every balance is read back from ord-tap. Result on 11 October 2026: all checks passed. Each single-action inscription cost 420–515 sats at 1 sat/vB, as the fee model expects.
+
+To run it:
+
+```powershell
+bitcoind -regtest -txindex=1 -listen=0 -fallbackfee=0.0002 -datadir=<dir>
+ord --regtest --bitcoin-data-dir <dir> --index <dir>\ord-tap.redb server --address 127.0.0.1 --http --http-port 3333
+$env:BITCOIN_COOKIE = '<dir>\regtest\.cookie'; $env:ORD_TAP = 'http://127.0.0.1:3333'
+node scripts/regtest-e2e.mjs
+```
+
+ord-tap needs its Node 20 V8 artifact to build (see its README). That artifact is only used for DMT mints, which this check does not touch.
 
 ## Tests
 

@@ -227,7 +227,7 @@ function renderArena() {
   if (ARENA.prize?.tap && $('a-prize').textContent === 'TBA') $('a-prize').textContent = num(ARENA.prize.tap);
   const rows = status !== 'upcoming' && ARENA_SNAP?.season === ARENA.season ? ARENA_SNAP.standings || [] : [];
   $('a-table').innerHTML = rows.length ? rows.map((r, i) =>
-    `<tr><td>${r.eligible ? i + 1 : '–'}</td><td><b>${esc(r.name)}</b>${r.eligible ? '' : ` <span class="pill">needs ${esc(ARENA.minDeals)} deals on ${esc(ARENA.minActiveDays || 1)}+ days</span>`}</td><td class="n">${num(r.deals)}</td><td class="n">${num(r.volumeTap)}</td><td class="n ${r.pnlTap >= 0 ? 'pos' : 'neg'}">${num(r.pnlTap, 2)}</td></tr>`).join('')
+    `<tr><td>${r.rank ?? (r.eligible ? i + 1 : '–')}</td><td><b>${esc(r.name)}</b>${r.outOfCompetition ? ' <span class="pill">out of competition</span>' : r.eligible ? '' : ` <span class="pill">needs ${esc(ARENA.minDeals)} deals on ${esc(ARENA.minActiveDays || 1)}+ days</span>`}</td><td class="n">${num(r.deals)}</td><td class="n">${num(r.volumeTap)}</td><td class="n ${r.pnlTap >= 0 ? 'pos' : 'neg'}">${num(r.pnlTap, 2)}</td></tr>`).join('')
     : `<tr><td colspan="5" class="empty">${reg.length ? 'Registered: ' + reg.map((p) => '<b>' + esc(p.name) + '</b>').join(', ') + '. ' : ''}${status === 'upcoming' ? 'Standings appear here when the season starts.' : 'No counted deals yet.'}</td></tr>`;
 }
 async function loadArena() {

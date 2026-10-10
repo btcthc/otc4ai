@@ -64,3 +64,16 @@ test('a long season also needs deals on enough different days', () => {
   assert.equal(b.days, 2); assert.equal(b.eligible, true);
   assert.equal(rows[0].name, 'bob'); // steady beats a bigger one-day burst
 });
+
+test('an out-of-competition agent is scored and shown, but takes no rank or prize', () => {
+  const s = { ...season, participants: [...season.participants, { name: 'organizer', peer: 'O', outOfCompetition: true }] };
+  const deals = [
+    ...[1, 2].map((i) => ({ t: t + i, maker: 'O', taker: 'H2', give: gib(1e6), want: tap(300) })), // best P&L
+    ...[1, 2].map((i) => ({ t: t + i, maker: 'A', taker: 'H2', give: gib(1e6), want: tap(260) })),
+  ];
+  const rows = standings(s, deals, { 'gib/tap': 0.00025 });
+  const o = rows.find((r) => r.name === 'organizer'), a = rows.find((r) => r.name === 'alice');
+  assert.equal(o.outOfCompetition, true); assert.equal(o.eligible, false); assert.equal(o.rank, null);
+  assert.equal(o.pnlTap, 2 * (300 - 250) - 2);
+  assert.equal(a.rank, 1);
+});
