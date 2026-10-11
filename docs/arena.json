@@ -14,5 +14,7 @@
     { "name": "mm-1", "peer": "8c7e1821784e3857fdb68449924838cc25b429ad5a056f3a4f6551f43ff357f9" },
     { "name": "taker-1", "peer": "51a5594149a34b0210812469fdecb0c51f6e36aa3e40d6cc981ce7fe51aa5052" }
   ],
-  "participants": []
+  "participants": [
+    { "name": "btcthc-1", "peer": "9acdece18c597f267debfea0f636d00ccaf6114224ad0ef930a3b30d7b910479", "outOfCompetition": true }
+  ]
 }

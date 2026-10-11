@@ -77,28 +77,70 @@ export function checkWindows(t1, t2, tip) {
 
 async function getJson(url) {
   const r = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!r.ok) throw new Error(url + ' → ' + r.status);
+  if (!r.ok) { const e = new Error(url + ' → ' + r.status); e.status = r.status; throw e; }
   return r.json();
+}
+
+// Public TAP readers (e.g. https://tap-reader-tw.tap-hosting.xyz) serve balances and token-auth redeem
+// lists, but no /r/tap lock routes. There a lock is found through the redeem that created it: the lock
+// owner's redeem list holds the inscription, and its action at the lock index is the lock as the indexer
+// accepted it (a redeem is listed only if all its actions passed). Claims and refunds are found by
+// scanning the newest redeems of all accounts.
+const PAGE = 100;
+async function scanRedeems(base, path, total, visit) { // newest first; visit returns undefined to go on
+  for (let off = Math.max(0, total - PAGE); ; off = Math.max(0, off - PAGE)) {
+    const { result = [] } = await getJson(`${base}/${path}?offset=${off}&max=${PAGE}`);
+    for (const r of [...result].reverse()) { const v = visit(r); if (v !== undefined) return v; }
+    if (off === 0) return null;
+  }
+}
+async function readerLock(base, lockId, owner) {
+  const ins = lockId.replace(/:\d+$/, ''), index = Number(lockId.split(':').pop());
+  const total = Number((await getJson(`${base}/getAccountRedeemListLength/${owner}`)).result) || 0;
+  return scanRedeems(base, `getAccountRedeemList/${owner}`, total, (r) => {
+    if (r.ins !== ins) return undefined;
+    const a = r.rdm?.actions?.[index];
+    return a?.op === 'lock' ? { ...a, blck: r.blck } : null;
+  });
+}
+// The claim or refund action that consumed a lock, searched back to `since` (block height).
+async function readerRelease(base, lockId, since) {
+  if (!since) since = Number((await getJson(`${base}/getCurrentBlock`)).result) - 1000; // ~7 days, longer than any refund window
+  const total = Number((await getJson(`${base}/getRedeemListLength`)).result) || 0;
+  return scanRedeems(base, 'getRedeemList', total, (r) => {
+    if (r.blck < since) return null;
+    const a = (r.rdm?.actions || []).find((x) => (x.op === 'claim' || x.op === 'refund') && x.lock === lockId);
+    return a ? { ...a, ins: r.ins, blck: r.blck } : undefined;
+  });
 }
 
 // Compare an on-chain lock record with the expected leg. Returns { ok, problems, record }.
 export async function verifyLock(indexer, lockId, expected, tip) {
   const base = String(indexer || '').replace(/\/+$/, '');
   if (!base) return { ok: false, problems: ['no indexer configured — verify manually'], record: null };
-  const { result: rec } = await getJson(`${base}/r/tap/getLock/${encodeURIComponent(lockId)}`);
+  // ord-tap answers /r/tap/getLock; a public reader answers 404 there, so the lock is read from its redeem
+  let rec, reader = false;
+  try { ({ result: rec } = await getJson(`${base}/r/tap/getLock/${encodeURIComponent(lockId)}`)); }
+  catch (e) { if (e.status !== 404) throw e; reader = true; rec = await readerLock(base, lockId, expected.refund); }
   if (!rec) return { ok: false, problems: ['lock not found (not confirmed yet?)'], record: null };
   const p = [];
   const eq = (a, b, what) => { if (String(a).toLowerCase() !== String(b).toLowerCase()) p.push(`${what}: ${a} ≠ ${b}`); };
   eq(rec.kind, 'otc', 'kind');
   eq(rec.tick, expected.tick, 'ticker');
   eq(rec.claim, expected.claim, 'claim address');
+  if (rec.refund !== undefined) eq(rec.refund, expected.refund, 'refund address');
   eq(rec.refund_after, expected.refund_after, 'refund height');
   eq(rec.condition?.hash, expected.condition.hash, 'hashlock');
-  const dep = await getJson(`${base}/r/tap/getDeployment/${encodeURIComponent(expected.tick)}`).then((j) => j.result).catch(() => null);
+  const dep = await getJson(`${base}/${reader ? '' : 'r/tap/'}getDeployment/${encodeURIComponent(expected.tick)}`).then((j) => j.result).catch(() => null);
   if (!dep) p.push('ticker deployment not found');
-  else if (BigInt(rec.amt) < toAtomic(expected.amt, dep.dec)) p.push(`amount too small: ${rec.amt} < ${toAtomic(expected.amt, dep.dec)} (atomic, ${dep.dec} decimals)`);
+  else {
+    const have = reader ? toAtomic(rec.amt, dep.dec) : BigInt(rec.amt); // a redeem keeps the decimal amount, getLock the atomic one
+    if (have < toAtomic(expected.amt, dep.dec)) p.push(`amount too small: ${have} < ${toAtomic(expected.amt, dep.dec)} (atomic, ${dep.dec} decimals)`);
+  }
   if (rec.remaining !== undefined && rec.remaining !== rec.amt) p.push('lock already partly consumed');
-  const consumed = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`).then((j) => j.result).catch(() => null);
+  const consumed = reader
+    ? await readerRelease(base, lockId, rec.blck).catch(() => null)
+    : await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`).then((j) => j.result).catch(() => null);
   if (consumed) p.push('lock already consumed');
   if (tip && Number(rec.refund_after) <= tip) p.push('refund window already open');
   return { ok: p.length === 0, problems: p, record: rec };
@@ -114,7 +156,8 @@ export function toAtomic(amt, dec) {
 export async function lockConsumed(indexer, lockId) {
   const base = String(indexer || '').replace(/\/+$/, '');
   if (!base) return false;
-  const j = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`).catch(() => null);
+  const j = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`).catch((e) => (e.status === 404 ? 'reader' : null));
+  if (j === 'reader') return !!(await readerRelease(base, lockId).catch(() => null));
   return !!j?.result;
 }
 
@@ -122,7 +165,14 @@ export async function lockConsumed(indexer, lockId) {
 export async function findPreimage(indexer, lockId, hash) {
   const base = String(indexer || '').replace(/\/+$/, '');
   if (!base) return null;
-  const { result: c } = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`);
+  let c;
+  try { ({ result: c } = await getJson(`${base}/r/tap/getLockConsume/${encodeURIComponent(lockId)}`)); }
+  catch (e) {
+    if (e.status !== 404) throw e;
+    const a = await readerRelease(base, lockId); // public reader: the claim action itself carries the preimage
+    const pre = typeof a?.preimage === 'string' ? a.preimage.toLowerCase() : '';
+    return a?.op === 'claim' && (await hashOf(pre).catch(() => '')) === hash ? pre : null;
+  }
   if (!c?.ins) return null;
   const body = await getJson(`${base}/content/${c.ins}`).catch(() => null);
   const actions = body?.redeem?.actions || [];

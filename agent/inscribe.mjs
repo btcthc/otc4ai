@@ -79,16 +79,16 @@ export function buildInscription(w, json, utxos, feeRate, { to = w.address } = {
   throw new Error(`not enough BTC on ${w.address}: need about ${need + fee(160, feeRate)} sats in UTXOs above ${DUST_GUARD} sats`);
 }
 
-// Sends an inscription (the postage output it sits on) back to the bot address, paying the fee from a clean UTXO.
-// The inscription is on the first sat of input 0, so it lands on the first sat of output 0.
-export function buildTap(w, inscribed /* { txid, vout, value } */, utxos, feeRate) {
+// Sends an inscription (the postage output it sits on) back to the bot address ("tap"), or to `to`, paying the
+// fee from a clean UTXO. The inscription is on the first sat of input 0, so it lands on the first sat of output 0.
+export function buildTap(w, inscribed /* { txid, vout, value } */, utxos, feeRate, to = w.address) {
   const ins = { ...inscribed, value: BigInt(inscribed.value) };
   const funding = utxos.map((u) => ({ ...u, value: BigInt(u.value) })).filter((u) => u.value > DUST_GUARD && !(u.txid === ins.txid && u.vout === ins.vout)).sort((a, b) => (b.value > a.value ? 1 : -1))[0];
   if (!funding) throw new Error(`no UTXO above ${DUST_GUARD} sats on ${w.address} to pay the tap fee`);
   const make = (change) => {
     const tx = new btc.Transaction();
     for (const u of [ins, funding]) tx.addInput({ txid: u.txid, index: u.vout, witnessUtxo: { script: w.script, amount: u.value }, tapInternalKey: w.pub });
-    tx.addOutputAddress(w.address, ins.value, w.network);
+    tx.addOutputAddress(to, ins.value, w.network);
     if (change > 0n) tx.addOutputAddress(w.address, change, w.network);
     tx.sign(w.priv); tx.finalize();
     return tx;
@@ -96,6 +96,23 @@ export function buildTap(w, inscribed /* { txid, vout, value } */, utxos, feeRat
   const f = fee(make(1n).vsize, feeRate);
   if (funding.value < f + 546n) throw new Error('the funding UTXO is too small for the tap fee');
   return make(funding.value - f);
+}
+
+// Sends all BTC above DUST_GUARD to `to` in one output. Small outputs stay, because they may carry inscriptions.
+export function buildSweep(w, utxos, feeRate, to) {
+  const inputs = utxos.map((u) => ({ ...u, value: BigInt(u.value) })).filter((u) => u.value > DUST_GUARD);
+  if (!inputs.length) throw new Error(`no UTXO above ${DUST_GUARD} sats on ${w.address}`);
+  const total = inputs.reduce((a, u) => a + u.value, 0n);
+  const make = (amount) => {
+    const tx = new btc.Transaction();
+    for (const u of inputs) tx.addInput({ txid: u.txid, index: u.vout, witnessUtxo: { script: w.script, amount: u.value }, tapInternalKey: w.pub });
+    tx.addOutputAddress(to, amount, w.network);
+    tx.sign(w.priv); tx.finalize();
+    return tx;
+  };
+  const f = fee(make(total - 1000n).vsize, feeRate);
+  if (total - f < 546n) throw new Error('the outputs are too small to pay the fee');
+  return make(total - f);
 }
 
 export const rawHex = (tx) => hex.encode(tx.extract());

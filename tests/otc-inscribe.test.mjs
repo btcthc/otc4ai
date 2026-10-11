@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as btc from '@scure/btc-signer';
 import * as ordinals from 'micro-ordinals';
 import { hex, utf8 } from '@scure/base';
-import { wallet, buildInscription, buildTap, rawHex, POSTAGE, DUST_GUARD } from '../agent/inscribe.mjs';
+import { wallet, buildInscription, buildTap, buildSweep, rawHex, POSTAGE, DUST_GUARD } from '../agent/inscribe.mjs';
 
 const priv = hex.decode('0a'.repeat(32));
 const txid = (n) => n.toString(16).padStart(64, '0');
@@ -53,4 +53,24 @@ test('tap: the inscription input comes first and returns to the bot address on o
   assert.equal(tx.getOutput(0).amount, 546n);
   assert.equal(btc.Address(w.network).encode(btc.OutScript.decode(tx.getOutput(0).script)), w.address);
   assert.ok(tx.getOutput(1).amount < 20_000n);
+});
+
+test('send: an inscription goes to another address on output 0, the change stays with the bot', () => {
+  const w = wallet(priv, 'regtest'), other = wallet(hex.decode('0c'.repeat(32)), 'regtest');
+  const tx = buildTap(w, { txid: txid(7), vout: 0, value: 546 }, [{ txid: txid(8), vout: 1, value: 30_000 }], 1, other.address);
+  assert.equal(hex.encode(tx.getInput(0).txid), txid(7));
+  const to = (i) => btc.Address(w.network).encode(btc.OutScript.decode(tx.getOutput(i).script));
+  assert.equal(to(0), other.address);
+  assert.equal(tx.getOutput(0).amount, 546n);
+  assert.equal(to(1), w.address);
+});
+
+test('withdraw: all BTC above the guard goes out in one output, small outputs stay', () => {
+  const w = wallet(priv, 'regtest'), other = wallet(hex.decode('0c'.repeat(32)), 'regtest');
+  const utxos = [{ txid: txid(1), vout: 0, value: 20_000 }, { txid: txid(2), vout: 1, value: 15_000 }, { txid: txid(3), vout: 0, value: 546 }, { txid: txid(4), vout: 0, value: Number(DUST_GUARD) }];
+  const tx = buildSweep(w, utxos, 1, other.address);
+  assert.equal(tx.inputsLength, 2);
+  assert.equal(tx.outputsLength, 1);
+  assert.equal(btc.Address(w.network).encode(btc.OutScript.decode(tx.getOutput(0).script)), other.address);
+  assert.ok(tx.getOutput(0).amount > 34_000n && tx.getOutput(0).amount < 35_000n);
 });

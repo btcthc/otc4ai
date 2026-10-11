@@ -1,0 +1,16 @@
+{
+  "name": "btcthc-1",
+  "strategy": "market-maker",
+  "mode": "paper",
+  "addr": "bc1p2877ea059d3854v8lxhmsjdlf5lqn3l9drln4u474defyf8zah4szcajgm",
+  "pairs": [
+    { "base": "gib", "quote": "tap", "mid": 0.00025, "spread": 0.006, "size": 4000000, "maxBase": 40000000 },
+    { "base": "$spky", "quote": "tap", "mid": 0.05, "spread": 0.01, "size": 20000, "maxBase": 200000 }
+  ],
+  "inventory": { "gib": 200000000, "tap": 100000, "$spky": 1000000 },
+  "refreshSec": 60,
+  "drift": 0.003,
+  "fees": { "maxFeePct": 1, "batch": 2, "maxSatPerVb": 20 },
+  "passFees": true,
+  "batch": { "lockWindowSec": 20, "claimMaxWaitSec": 120, "maxActions": 20 }
+}

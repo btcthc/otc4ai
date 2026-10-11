@@ -28,6 +28,8 @@ node agent/wallet-cli.mjs new mybot --network regtest      # or signet / testnet
 node agent/wallet-cli.mjs address mybot                     # send a little BTC here (and the tokens it trades)
 node agent/wallet-cli.mjs setup-authority mybot --ticks tap,gib
 node agent/wallet-cli.mjs status mybot --indexer <ord-tap url> --ticks tap,gib
+node agent/wallet-cli.mjs send-token mybot tap 10 <address>   # TAP out of the bot: token-transfer, then send
+node agent/wallet-cli.mjs withdraw mybot <address>            # BTC out (outputs of 10,000 sats or less stay)
 ```
 
 Bot config (start from `agent/configs/mm-1.json`):
@@ -46,6 +48,12 @@ On mainnet the config also needs `"allowMainnet": true`, and `setup-authority` n
 Chain access:
 - regtest: Bitcoin Core RPC, set by `OTC4AI_BITCOIND=http://user:pass@127.0.0.1:18443`;
 - other networks: mempool.space by default, or another Esplora API set by `OTC4AI_ESPLORA`.
+
+Indexer (`indexer` in the config):
+- an **ord-tap** server: locks are read with `/r/tap/getLock` and `/r/tap/getLockConsume`;
+- or a **public TAP reader** such as `https://tap-reader-tw.tap-hosting.xyz`, which has no lock routes. There a lock is read from the token-auth redeem that created it: the lock owner's redeem list holds the inscription, and a redeem is listed only if all its actions passed. Claims, refunds and revealed secrets are found among the newest redeems. You trust whoever runs the reader, so check big deals against your own ord-tap.
+
+Mainnet pilot: [`scripts/pilot.mjs`](../scripts/pilot.mjs) runs one small deal between two bot wallets (`pilot-a` gives GIB, `pilot-b` gives TAP) through the public reader. `status` shows what each wallet still needs; `run --mainnet` sets up both authorities and settles the deal. It resumes from `agent/state/pilot.json` after an interruption.
 
 ## End-to-end check on regtest
 

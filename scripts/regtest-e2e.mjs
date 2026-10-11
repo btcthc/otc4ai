@@ -175,5 +175,14 @@ const big = { ...d1, id: d1.id + 'x', offer: { ...d1.offer, want: { tick: 'tap',
 const refused = await taker.lock(big, 'taker').then(() => null, (e) => e.message);
 check(/per-deal limit/.test(refused || '') && (await chain.utxos(tk.w.address)).length === before, `a 500 tap lock is refused: ${refused}`);
 
+// Money out: wallet-cli send-token moves 100 tap from the taker to the maker, withdraw empties the taker's BTC.
+const auto2 = setInterval(() => mine().catch(() => {}), 2000);
+try { log((await cli('send-token', 'tk', 'tap', '100', mm.w.address)).trim().split('\n').pop()); } finally { clearInterval(auto2); }
+await mine(); await synced();
+check(await balance(tk.w.address, 'tap') === 875n * E18 && await balance(mm.w.address, 'tap') === 125n * E18, 'send-token moved 100 tap from the taker to the maker');
+log((await cli('withdraw', 'tk', await miner('getnewaddress'))).trim());
+await mine();
+check((await chain.utxos(tk.w.address)).every((x) => x.value <= 10_000), 'withdraw left only the small outputs on the taker wallet');
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll live-mode checks passed on regtest with ord-tap.');
 process.exit(failures ? 1 : 0);

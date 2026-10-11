@@ -5,6 +5,8 @@
 //   node agent/wallet-cli.mjs address <name>
 //   node agent/wallet-cli.mjs status <name> [--indexer <ord-tap url>] [--ticks tap,gib]
 //   node agent/wallet-cli.mjs setup-authority <name> [--ticks tap,gib] [--mainnet]
+//   node agent/wallet-cli.mjs send-token <name> <tick> <amount> <address> [--mainnet]   (TAP transfer out of the bot)
+//   node agent/wallet-cli.mjs withdraw <name> <address> [--mainnet]                     (BTC above 10,000 sats out)
 //   node agent/wallet-cli.mjs stop | resume        (kill switch for every live bot)
 //
 // The private key is kept in agent/state/<name>.wallet.json (gitignored) and is never printed.
@@ -14,7 +16,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { hex } from '@scure/base';
-import { wallet, buildInscription, buildTap, rawHex, POSTAGE } from './inscribe.mjs';
+import { wallet, buildInscription, buildTap, buildSweep, rawHex, POSTAGE } from './inscribe.mjs';
 import { authInscription, authorityPubkey } from './tapsign.mjs';
 import { chainFor } from './chains.mjs';
 
@@ -41,7 +43,7 @@ if (cmd === 'stop' || cmd === 'resume') {
   else { fs.rmSync(stop, { force: true }); console.log('Kill switch OFF.'); }
   process.exit(0);
 }
-if (!name || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) die('usage: node agent/wallet-cli.mjs <new|address|status|setup-authority> <name> ... (see the header of this file)');
+if (!name || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) die('usage: node agent/wallet-cli.mjs <new|address|status|setup-authority|send-token|withdraw> <name> ... (see the header of this file)');
 
 if (cmd === 'new') {
   const network = flag('network');
@@ -81,5 +83,27 @@ if (cmd === 'new') {
     await waitConfirmed(chain, tapTx.id, 'the tap');
     save(name, { ...wf, auth: inscriptionId, authTicks: ticks });
     console.log(`authority ready: ${inscriptionId}\nIt is saved in the wallet file; live bots that use this wallet pick it up.`);
+  } else if (cmd === 'send-token') {
+    // A TAP transfer: inscribe token-transfer on the bot's own address, then send that inscription to the receiver.
+    const [, , tick, amt, to] = process.argv.slice(2);
+    if (!tick || !/^(0|[1-9]\d*)(\.\d+)?$/.test(amt || '') || !to || to.startsWith('--')) die('usage: send-token <name> <tick> <amount> <address> [--mainnet]');
+    if (wf.network === 'mainnet' && !has('mainnet')) die('this spends real BTC: add --mainnet to confirm');
+    const ins = { p: 'tap', op: 'token-transfer', tick: tick.toLowerCase(), amt: String(amt) };
+    const rate = await chain.feeRate();
+    const { commit, reveal, inscriptionId, feeSats } = buildInscription(w, ins, await chain.utxos(w.address), rate);
+    console.log(`token-transfer of ${amt} ${tick}: inscribing ${inscriptionId} at ${rate} sat/vB (${feeSats} sats)`);
+    await chain.broadcast(rawHex(commit)); await chain.broadcast(rawHex(reveal));
+    await waitConfirmed(chain, reveal.id, 'the transfer inscription');
+    const send = buildTap(w, { txid: reveal.id, vout: 0, value: Number(POSTAGE) }, await chain.utxos(w.address), await chain.feeRate(), to);
+    await chain.broadcast(rawHex(send));
+    await waitConfirmed(chain, send.id, 'the send');
+    console.log(`sent ${amt} ${tick} to ${to} (tx ${send.id})`);
+  } else if (cmd === 'withdraw') {
+    const to = process.argv[4];
+    if (!to || to.startsWith('--')) die('usage: withdraw <name> <address> [--mainnet]');
+    if (wf.network === 'mainnet' && !has('mainnet')) die('this spends real BTC: add --mainnet to confirm');
+    const tx = buildSweep(w, await chain.utxos(w.address), await chain.feeRate(), to);
+    await chain.broadcast(rawHex(tx));
+    console.log(`withdrew ${tx.getOutput(0).amount} sats to ${to} (tx ${tx.id}); outputs of 10,000 sats or less stay, they may carry inscriptions`);
   } else die('unknown command ' + cmd);
 }
