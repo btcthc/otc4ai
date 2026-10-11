@@ -4,6 +4,8 @@
 //
 //   node scripts/pilot.mjs status              what each wallet holds and what is still missing
 //   node scripts/pilot.mjs run --mainnet       set up both authorities if needed, then run the deal
+//   add --wait to wait (up to 3 days) until both wallets are funded instead of stopping
+// Everything is also logged to agent/state/pilot.log.
 //
 // Wallets: pilot-a is the maker (gives GIB), pilot-b the taker (gives TAP). Create them with
 //   node agent/wallet-cli.mjs new pilot-a --network mainnet   (and pilot-b)
@@ -26,7 +28,11 @@ const DEAL = { give: { tick: 'gib', amt: '1' }, want: { tick: 'tap', amt: '1' } 
 const LIMITS = { perDealTap: 5, perDayTap: 10, maxOpenTap: 5, ticks: ['gib', 'tap'] };
 const progressFile = path.join(state, 'pilot.json');
 const cmd = process.argv[2];
-const log = (s) => console.log(`${new Date().toISOString().slice(0, 19).replace('T', ' ')}  ${s}`);
+const log = (s) => {
+  const line = `${new Date().toISOString().slice(0, 19).replace('T', ' ')}  ${s}`;
+  console.log(line);
+  try { fs.appendFileSync(path.join(state, 'pilot.log'), line + '\n'); } catch {}
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chain = chainFor('mainnet');
 
@@ -77,10 +83,16 @@ async function confirmed(txidOrIns) {
 
 async function run() {
   if (!process.argv.includes('--mainnet')) { console.error('this spends real BTC: add --mainnet'); process.exit(1); }
-  for (const [x, need] of [[a, 'gib'], [b, 'tap']]) {
-    const h = await holdings(x);
-    if (h.fees < 5000 || !(h[need] > 0)) { await status(); console.error('\nfund both wallets first (see above)'); process.exit(1); }
+  const funded = async () => {
+    for (const [x, need] of [[a, 'gib'], [b, 'tap']]) { const h = await holdings(x).catch(() => null); if (!h || h.fees < 5000 || !(h[need] > 0)) return false; }
+    return true;
+  };
+  for (let i = 0; !(await funded()); i++) {
+    if (!process.argv.includes('--wait') || i >= 3 * 24 * 30) { await status(); console.error('\nfund both wallets first (see above)'); process.exit(1); }
+    if (i % 5 === 0) await status();
+    await sleep(120e3);
   }
+  log('both wallets are funded');
   // 1. authorities, both at once (each is an inscription plus a tap, about 20 minutes)
   const todo = [a, b].filter((x) => !x.wf.auth);
   if (todo.length) {
